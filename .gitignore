@@ -1,0 +1,155 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# 虚拟环境
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.uv/
+uv.lock
+
+# IDE和编辑器
+.vscode/settings.json
+.vscode/launch.json
+.idea/
+*.swp
+*.swo
+*~
+.sublime-project
+.sublime-workspace
+
+# 日志文件
+*.log
+logs/
+*.out
+*.err
+
+# 数据库文件
+*.db
+*.sqlite3
+*.sqlite
+
+# 模型文件 (太大，不适合git)
+models/*.gguf
+models/*.bin
+models/*.safetensors
+models/*.pt
+models/*.pth
+models/*.onnx
+tensorrt_engines/
+dla_models/
+*.trt
+*.engine
+
+# 数据文件
+data/raw/
+data/processed/
+data/cache/
+data/downloads/
+*.csv
+*.json
+*.parquet
+*.h5
+*.hdf5
+
+# 临时文件和缓存
+tmp/
+temp/
+.cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# 系统文件
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 环境配置文件
+.env.local
+.env.development
+.env.production
+.env.staging
+.env.test
+
+# Docker
+.dockerignore
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# 前端
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+dist/
+build/
+
+# 证书和密钥
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# 备份文件
+*.bak
+*.backup
+*.old
+*.orig
+
+# 压缩文件
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# 性能分析文件
+*.prof
+*.pstats
+
+# 文档构建
+docs/_build/
+docs/build/
+site/
+
+# 配置文件中的敏感信息
+config/secrets/
+secrets/
+credentials/

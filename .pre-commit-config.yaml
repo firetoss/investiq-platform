@@ -1,0 +1,124 @@
+# Pre-commit hooks configuration for InvestIQ Platform
+# 确保代码质量和一致性
+
+repos:
+  # 基础hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: trailing-whitespace
+        description: 移除行尾空白字符
+      - id: end-of-file-fixer
+        description: 确保文件以换行符结尾
+      - id: check-yaml
+        description: 检查YAML文件语法
+      - id: check-json
+        description: 检查JSON文件语法
+      - id: check-toml
+        description: 检查TOML文件语法
+      - id: check-added-large-files
+        description: 防止提交大文件
+        args: ['--maxkb=10240']  # 10MB限制
+      - id: check-merge-conflict
+        description: 检查合并冲突标记
+      - id: check-case-conflict
+        description: 检查文件名大小写冲突
+      - id: check-docstring-first
+        description: 检查Python文档字符串位置
+      - id: debug-statements
+        description: 检查调试语句
+
+  # Python代码格式化
+  - repo: https://github.com/psf/black
+    rev: 23.11.0
+    hooks:
+      - id: black
+        description: Python代码格式化
+        language_version: python3
+        args: [--line-length=88]
+
+  # Python导入排序
+  - repo: https://github.com/pycqa/isort
+    rev: 5.12.0
+    hooks:
+      - id: isort
+        description: Python导入语句排序
+        args: [--profile=black, --line-length=88]
+
+  # Python代码检查
+  - repo: https://github.com/pycqa/flake8
+    rev: 6.1.0
+    hooks:
+      - id: flake8
+        description: Python代码风格检查
+        args: 
+          - --max-line-length=88
+          - --extend-ignore=E203,W503,E501
+          - --exclude=migrations,__pycache__,.git,build,dist
+
+  # Python类型检查
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.7.1
+    hooks:
+      - id: mypy
+        description: Python静态类型检查
+        additional_dependencies: 
+          - types-requests
+          - types-redis
+          - types-PyYAML
+        args: [--ignore-missing-imports, --no-strict-optional]
+        exclude: ^(migrations/|tests/|scripts/)
+
+  # 安全检查
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.5
+    hooks:
+      - id: bandit
+        description: Python安全漏洞检查
+        args: [-r, backend/, -f, json, -o, bandit-report.json]
+        exclude: ^(tests/|migrations/)
+
+  # Docker文件检查
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.12.0
+    hooks:
+      - id: hadolint-docker
+        description: Dockerfile最佳实践检查
+        args: [--ignore, DL3008, --ignore, DL3009]
+
+  # YAML格式化
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v3.0.3
+    hooks:
+      - id: prettier
+        description: YAML/JSON格式化
+        types_or: [yaml, json]
+        exclude: ^(.*\.lock|uv\.lock)$
+
+# 全局配置
+default_language_version:
+  python: python3.11
+
+# 排除文件
+exclude: |
+  (?x)^(
+    migrations/.*|
+    .*\.lock|
+    .*\.min\.(js|css)|
+    node_modules/.*|
+    build/.*|
+    dist/.*
+  )$
+
+# CI配置
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from pre-commit.com hooks
+    
+    for more information, see https://pre-commit.ci
+  autofix_prs: true
+  autoupdate_branch: ''
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_schedule: weekly
+  skip: []
+  submodules: false
