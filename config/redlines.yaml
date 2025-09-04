@@ -1,0 +1,277 @@
+# InvestIQ Platform - 红线参数配置
+# 系统关键业务阈值，变更需要经过严格审批流程
+
+version: "1.0.0"
+updated_at: "2024-01-15T10:30:45Z"
+updated_by: "system"
+
+# ===========================================
+# 四闸门红线参数 (核心投资决策阈值)
+# ===========================================
+gatekeeper:
+  # 行业闸门 - 行业评分必须达到的最低标准
+  industry:
+    threshold: 70.0
+    description: "行业评分达标门槛"
+    business_justification: "确保选择的行业处于政策支持和市场成长期"
+    last_review: "2024-01-10"
+    review_frequency: "quarterly"  # 季度评审
+
+  # 个股闸门 - 公司质量评分门槛  
+  company:
+    threshold: 70.0
+    description: "个股评分达标门槛"
+    business_justification: "筛选具备长期竞争优势的优质公司"
+    last_review: "2024-01-10"
+    review_frequency: "quarterly"
+
+  # 估值闸门 - 防止高估值风险
+  valuation:
+    # 标准股票估值分位上限
+    percentile_max: 0.7
+    description: "相对自身5年估值分位不超过70%"
+    business_justification: "控制估值风险，买在相对低位"
+    
+    # 成长股特殊标准 
+    growth_stock:
+      percentile_max: 0.8
+      peg_max: 1.5
+      description: "成长股估值分位可适当放宽到80%，但PEG不超过1.5"
+      business_justification: "为优质成长股提供适度估值溢价空间"
+    
+    last_review: "2024-01-10"
+    review_frequency: "monthly"  # 月度评审（估值变化较快）
+
+  # 执行闸门 - 技术面确认
+  execution:
+    above_200dma: true
+    description: "股价必须在200日移动平均线上方"
+    business_justification: "确保趋势向上，减少逆势操作风险"
+    last_review: "2024-01-10"
+    review_frequency: "monthly"
+
+# ===========================================
+# 评分权重红线 (评分模型核心参数)
+# ===========================================
+scoring_weights:
+  # 行业评分权重 P/E/M/R模型
+  industry:
+    policy_weight: 0.35      # 政策维度权重
+    execution_weight: 0.25   # 落地维度权重  
+    market_weight: 0.25      # 市场维度权重
+    risk_weight: 0.15        # 风险维度权重 (负向)
+    total_check: 1.0         # 权重总和必须为1.0
+    description: "行业四维评分权重分配"
+    business_justification: "政策导向性最重要，风险控制权重适中"
+    last_review: "2024-01-05"
+    review_frequency: "semi_annual"  # 半年评审
+
+  # 个股评分权重 Q/V/M/C/S模型  
+  equity:
+    quality_weight: 0.30     # 质量维度权重
+    valuation_weight: 0.20   # 估值维度权重
+    momentum_weight: 0.25    # 动量维度权重
+    catalyst_weight: 0.15    # 催化维度权重
+    share_weight: 0.10       # 份额维度权重
+    total_check: 1.0         # 权重总和必须为1.0
+    description: "个股五维评分权重分配"
+    business_justification: "质量优先，动量次之，兼顾估值合理性"
+    last_review: "2024-01-05"
+    review_frequency: "semi_annual"
+
+# ===========================================
+# 流动性红线 (市场容量限制)
+# ===========================================
+liquidity:
+  # 参与率上限 (防止对市场造成冲击)
+  participation_rate:
+    a_share: 0.10           # A股日成交量参与率不超过10%
+    h_share: 0.08           # H股日成交量参与率不超过8%
+    description: "日成交量参与率上限，防止市场冲击"
+    business_justification: "保证流动性，避免价格扭曲"
+
+  # 退出时间要求 (保证变现能力)
+  exit_requirements:
+    core_position_days: 5    # 核心仓位5个交易日内可退出
+    tactical_position_days: 3 # 战术仓位3个交易日内可退出
+    description: "持仓变现时间要求"
+    business_justification: "确保投资组合具备足够流动性"
+
+  # 绝对流动性底线
+  absolute_floor:
+    a_share_adv20_min: 30000000   # A股ADV20最低3000万元
+    h_share_adv20_min: 20000000   # H股ADV20最低2000万元  
+    description: "最低成交额要求"
+    business_justification: "绝对流动性底线，低于此值不纳入候选池"
+
+  # 自由流通市值占用
+  free_float_utilization:
+    max_percentage: 0.02     # 不超过自由流通市值的2%
+    description: "单一投资组合占用自由流通市值比例上限"
+    business_justification: "避免持股比例过高影响流动性"
+
+  last_review: "2024-01-12"
+  review_frequency: "monthly"
+
+# ===========================================
+# 投资组合红线 (风险控制)
+# ===========================================
+portfolio:
+  # A/B/C分层权重限制
+  tier_weights:
+    a_tier:  # 核心层
+      min_weight: 0.12       # 最低12%
+      max_weight: 0.15       # 最高15%
+      description: "核心层权重区间"
+    b_tier:  # 重要层  
+      min_weight: 0.08       # 最低8%
+      max_weight: 0.10       # 最高10%
+      description: "重要层权重区间"
+    c_tier:  # 战术层
+      min_weight: 0.03       # 最低3%  
+      max_weight: 0.05       # 最高5%
+      description: "战术层权重区间"
+
+  # 杠杆限制
+  leverage:
+    max_leverage: 1.10       # 最大杠杆1.1倍
+    description: "投资组合最大杠杆倍数"
+    business_justification: "适度杠杆提升收益，严控风险"
+
+  # 集中度限制
+  concentration:
+    single_stock_max: 0.15   # 单只股票最高15%
+    single_industry_max: 0.25 # 单一行业最高25%
+    description: "持仓集中度限制"
+    business_justification: "防范集中度风险，确保分散投资"
+
+  last_review: "2024-01-08"
+  review_frequency: "quarterly"
+
+# ===========================================
+# 风险控制红线 (止损与断路器)
+# ===========================================
+risk_controls:
+  # 回撤断路器分级
+  circuit_breaker:
+    level_1:
+      drawdown_threshold: -0.10  # -10%触发一级预警
+      action: "alert_only"       # 仅告警，不强制操作
+      description: "一级预警，密切关注"
+      
+    level_2:
+      drawdown_threshold: -0.20  # -20%触发二级断路
+      action: "reduce_exposure"  # 强制减仓
+      reduction_percentage: 0.30 # 减仓30%
+      description: "二级断路，强制减仓30%"
+      
+    level_3:
+      drawdown_threshold: -0.30  # -30%触发三级断路
+      action: "emergency_exit"   # 紧急清仓
+      description: "三级断路，紧急清仓保护资本"
+
+  # 回撤锁存机制
+  drawdown_latch:
+    enable_latch: true
+    recovery_conditions:
+      - "drawdown_within_threshold_for_3_days"  # 连续3天回到阈值内
+      - "new_high_achieved"                     # 或创出新高
+    description: "回撤锁存，满足恢复条件才解除"
+    business_justification: "防止反复触发，确保真实恢复"
+
+  last_review: "2024-01-15"
+  review_frequency: "monthly"
+
+# ===========================================
+# 告警红线 (监控阈值)
+# ===========================================
+alerts:
+  # 告警节流参数
+  throttling:
+    global_min_interval_minutes: 120  # 全局最小间隔2小时
+    by_type:
+      event_minutes: 60              # 事件告警1小时
+      kpi_minutes: 1440              # KPI告警24小时  
+      trend_days: 5                  # 趋势告警5天
+    description: "告警频率控制，防止告警风暴"
+
+  # 告警升级阈值
+  escalation:
+    p3_to_p2_hits: 3                 # 3次P3告警升级为P2
+    p2_to_p1_hits: 2                 # 2次P2告警升级为P1
+    description: "告警升级规则，确保重要问题及时关注"
+
+  last_review: "2024-01-15" 
+  review_frequency: "monthly"
+
+# ===========================================
+# 数据质量红线 (置信度阈值)
+# ===========================================
+data_quality:
+  # 置信度阈值
+  confidence_thresholds:
+    min_confidence_for_trading: 80.0    # 交易决策最低置信度80%
+    min_confidence_for_scoring: 60.0    # 评分计算最低置信度60%
+    data_staleness_warning_days: 5      # 数据超过5天发出预警
+    data_staleness_reject_days: 20      # 数据超过20天拒绝使用
+    description: "数据质量控制阈值"
+
+  # 停牌处理
+  suspension_handling:
+    max_suspension_days_for_scoring: 60  # 停牌超过60天不参与评分
+    carry_forward_weight: 0.5            # 停牌期间前值携带权重50%
+    description: "停牌股票数据处理规则"
+
+  last_review: "2024-01-10"
+  review_frequency: "monthly"
+
+# ===========================================
+# 合规与审计红线 (监管要求)
+# ===========================================
+compliance:
+  # 审计追踪
+  audit_requirements:
+    decision_logging: true              # 强制记录所有决策
+    evidence_retention_days: 2555       # 证据保留7年 (7*365)
+    audit_chain_validation: true        # 启用审计链验证
+    description: "合规审计要求"
+
+  # 操作限制
+  operational_limits:
+    max_single_trade_amount: 10000000   # 单笔交易最大1000万
+    daily_trade_amount_limit: 50000000  # 日交易额上限5000万
+    require_dual_approval: true         # 需要双重审批
+    description: "操作风险控制"
+
+  last_review: "2024-01-05"
+  review_frequency: "quarterly"
+
+# ===========================================
+# 元数据 (配置管理信息)
+# ===========================================
+metadata:
+  schema_version: "1.0.0"
+  config_type: "redlines"
+  environment: "production"
+  
+  # 变更控制
+  change_control:
+    requires_approval: true
+    approval_committee: ["CIO", "Risk_Manager", "Compliance_Officer"]
+    change_window: "market_closed_only"  # 仅在收市后变更
+    rollback_capability: true
+    
+  # 配置验证
+  validation:
+    schema_validation: true
+    business_rule_validation: true  
+    impact_analysis_required: true
+    
+  # 同步控制
+  sync:
+    auto_sync_to_services: false       # 手动同步，避免误操作
+    sync_confirmation_required: true
+    sync_rollback_window_minutes: 30   # 30分钟回滚窗口
+
+  next_scheduled_review: "2024-04-15"
+  emergency_contact: "risk-team@investiq.platform"

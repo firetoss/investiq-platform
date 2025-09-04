@@ -1,0 +1,321 @@
+# InvestIQ Platform - 应用配置
+# 可调整的业务参数，支持动态更新
+
+version: "1.0.0"
+updated_at: "2024-01-15T10:30:45Z"
+environment: "development"
+
+# ===========================================
+# 应用基础配置
+# ===========================================
+app:
+  name: "InvestIQ Platform"
+  version: "0.1.0"
+  debug: true
+  log_level: "INFO"
+  timezone: "Asia/Shanghai"
+  
+  # API配置
+  api:
+    version: "v1"
+    prefix: "/api/v1"
+    enable_docs: true
+    enable_openapi: true
+    cors_origins:
+      - "http://localhost:3000"
+      - "http://localhost:8000"
+    allowed_hosts:
+      - "localhost"
+      - "127.0.0.1"
+      - "0.0.0.0"
+
+# ===========================================
+# 数据源配置
+# ===========================================
+datasources:
+  # 数据库配置
+  database:
+    url: "postgresql://investiq:investiq123@localhost:5432/investiq"
+    pool_size: 20
+    max_overflow: 30
+    echo_sql: false
+    
+  # 缓存配置
+  redis:
+    url: "redis://localhost:6379/0"
+    default_ttl: 3600
+    max_connections: 20
+    
+  # 对象存储
+  minio:
+    url: "http://localhost:9000"
+    access_key: "investiq"
+    secret_key: "investiq123"
+    bucket: "investiq-data"
+    secure: false
+
+# ===========================================
+# 外部服务配置
+# ===========================================
+external_services:
+  # 金融数据服务
+  financial_data:
+    yfinance:
+      enabled: true
+      timeout: 30
+      retry_count: 3
+      
+    akshare:
+      enabled: true
+      timeout: 60
+      retry_count: 2
+      
+    data_update_interval: 300  # 5分钟更新
+
+  # AI/ML服务
+  ai_models:
+    local_llm:
+      enabled: true
+      model_name: "llama2-7b-chat"
+      max_tokens: 2048
+      temperature: 0.3
+      cache_dir: "/app/models"
+      
+    gpu_config:
+      cuda_visible_devices: "0"
+      memory_fraction: 0.8
+      enable_acceleration: true
+
+# ===========================================
+# 业务逻辑配置
+# ===========================================
+business:
+  # 评分引擎参数
+  scoring:
+    # 行业评分配置
+    industry:
+      update_frequency: "daily"
+      confidence_threshold: 70.0
+      evidence_weight: 0.8
+      
+    # 个股评分配置  
+    equity:
+      update_frequency: "intraday"
+      confidence_threshold: 75.0
+      red_flag_penalty: -10.0
+      
+  # 四闸门配置
+  gatekeeper:
+    # 动态调整参数 (在红线范围内)
+    adjustments:
+      market_condition_factor: 1.0    # 市场条件调整因子
+      volatility_adjustment: 0.0      # 波动率调整
+      seasonal_factor: 1.0            # 季节性因子
+      
+    # 特殊情况处理
+    exceptions:
+      enable_manual_override: false   # 人工干预开关
+      emergency_bypass: false         # 紧急绕过开关
+      
+  # 投资组合构建参数
+  portfolio:
+    construction:
+      rebalance_frequency: "weekly"   # 重平衡频率
+      transaction_cost_bps: 5         # 交易成本5bp
+      min_trade_amount: 10000         # 最小交易金额1万
+      
+    risk_budgeting:
+      volatility_target: 0.12         # 目标波动率12%
+      max_tracking_error: 0.05        # 最大跟踪误差5%
+      
+  # 执行配置
+  execution:
+    # 建仓计划
+    entry_plan:
+      default_legs: 3                 # 默认三段式建仓
+      leg1_percentage: 0.4            # 第一批40%
+      leg2_percentage: 0.4            # 第二批40% 
+      leg3_percentage: 0.2            # 第三批20%
+      
+    # 交易时段
+    trading_hours:
+      market_open: "09:30"
+      market_close: "15:00"
+      lunch_break_start: "11:30"
+      lunch_break_end: "13:00"
+
+# ===========================================
+# 监控与告警配置
+# ===========================================
+monitoring:
+  # 系统监控
+  system:
+    prometheus:
+      enabled: true
+      port: 9090
+      scrape_interval: "15s"
+      
+    grafana:
+      enabled: true
+      port: 3001
+      admin_password: "admin123"
+      
+  # 业务监控
+  business:
+    # 关键指标监控
+    kpi_monitoring:
+      portfolio_performance_check: "hourly"
+      risk_metrics_update: "every_15min"
+      liquidity_check: "every_5min"
+      
+    # 异常检测
+    anomaly_detection:
+      price_movement_threshold: 0.05   # 5%异常价格波动
+      volume_spike_threshold: 3.0      # 3倍成交量异常
+      correlation_break_threshold: 0.3  # 相关性断裂
+
+# ===========================================
+# 通知配置
+# ===========================================
+notifications:
+  # 通知渠道
+  channels:
+    email:
+      enabled: true
+      smtp_server: "smtp.gmail.com"
+      smtp_port: 587
+      use_tls: true
+      
+    webhook:
+      enabled: true
+      default_timeout: 30
+      retry_count: 3
+      
+    in_app:
+      enabled: true
+      retention_days: 30
+      
+  # 通知规则
+  rules:
+    trading_hours_only: false         # 是否仅交易时段通知
+    weekend_alerts: true              # 周末是否发送告警
+    holiday_alerts: false             # 节假日是否发送告警
+    
+    # 分级通知
+    severity_routing:
+      P1: ["email", "webhook", "in_app"]
+      P2: ["email", "in_app"] 
+      P3: ["in_app"]
+
+# ===========================================
+# 任务调度配置
+# ===========================================
+scheduling:
+  # Celery配置
+  celery:
+    broker_url: "redis://localhost:6379/0"
+    result_backend: "redis://localhost:6379/0"
+    timezone: "Asia/Shanghai"
+    
+    # 任务队列配置
+    queues:
+      high_priority: 
+        routing_key: "high"
+        prefetch_count: 1
+      normal_priority:
+        routing_key: "normal"  
+        prefetch_count: 5
+      low_priority:
+        routing_key: "low"
+        prefetch_count: 10
+        
+  # 定时任务
+  scheduled_tasks:
+    data_update:
+      schedule: "*/5 * * * *"          # 每5分钟
+      queue: "high_priority"
+      
+    portfolio_rebalance:
+      schedule: "0 9 * * 1"            # 每周一9点
+      queue: "normal_priority"
+      
+    risk_report:
+      schedule: "0 17 * * 1-5"         # 工作日17点
+      queue: "low_priority"
+
+# ===========================================
+# 安全配置
+# ===========================================
+security:
+  # 认证配置
+  authentication:
+    secret_key: "dev-secret-key"
+    algorithm: "HS256"
+    token_expire_minutes: 1440        # 24小时
+    
+  # 访问控制
+  access_control:
+    rate_limiting:
+      enabled: true
+      requests_per_minute: 100
+      burst_limit: 200
+      
+    ip_whitelist:
+      enabled: false
+      allowed_ips: []
+      
+  # 数据加密
+  encryption:
+    enable_data_encryption: true
+    encryption_key_rotation_days: 90
+    
+# ===========================================
+# 性能配置
+# ===========================================
+performance:
+  # 缓存策略
+  caching:
+    # 数据缓存
+    market_data_ttl: 300              # 市场数据缓存5分钟
+    score_data_ttl: 3600              # 评分数据缓存1小时
+    portfolio_data_ttl: 1800          # 投资组合数据缓存30分钟
+    
+    # 计算缓存
+    calculation_cache_size: 1000      # 计算结果缓存条数
+    model_prediction_ttl: 7200        # 模型预测缓存2小时
+    
+  # 异步处理
+  async_processing:
+    max_concurrent_tasks: 10
+    task_timeout_seconds: 300
+    result_retention_hours: 24
+    
+  # 数据库优化
+  database:
+    connection_pool_recycle: 3600     # 连接回收1小时
+    query_timeout: 30                 # 查询超时30秒
+    enable_query_logging: false       # 查询日志 (仅开发环境)
+
+# ===========================================
+# 环境特定配置
+# ===========================================
+environments:
+  development:
+    debug: true
+    log_level: "DEBUG"
+    enable_profiling: true
+    mock_external_services: false
+    
+  testing:
+    debug: true
+    log_level: "INFO"
+    enable_profiling: false
+    mock_external_services: true
+    database_url: "postgresql://test:test@localhost:5432/investiq_test"
+    
+  production:
+    debug: false
+    log_level: "WARNING"
+    enable_profiling: false
+    mock_external_services: false
+    # 生产环境配置将覆盖开发环境配置
