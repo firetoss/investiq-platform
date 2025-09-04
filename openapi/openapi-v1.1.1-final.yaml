@@ -1,0 +1,1318 @@
+openapi: 3.0.3
+info:
+  title: InvestIQ Platform - A+H Industry & Portfolio APIs
+  version: 1.1.1-final
+  description: |
+    行业选择与组合支持平台API规范
+    
+    基于四闸门方法论的投资决策支持系统，支持A股+H股市场。
+    
+    ## 核心功能
+    - 行业评分与筛选 (四维评分: P/E/M/R-)
+    - 个股评分与分析 (五维评分: Q/V/M/C/S)
+    - 四闸门校验 (Industry/Company/Valuation/Execution)
+    - 投资组合构建 (A/B/C分层策略)
+    - 流动性校验与容量管理
+    - 告警监控与风险管理
+    - 证据链管理与审计追踪
+    
+    ## 时间旅行查询
+    所有查询接口支持 `asOf` 参数进行时点查询，业务日期格式为 YYYY-MM-DD (时区: Asia/Shanghai)
+    
+    ## 幂等性
+    写操作支持 `Idempotency-Key` 请求头确保安全重试
+    
+  contact:
+    name: InvestIQ Platform Team
+    email: dev@investiq.platform
+  license:
+    name: Proprietary
+servers:
+  - url: https://edge.local/api/v1
+    description: Edge Server (ARM64)
+  - url: http://localhost:8000/api/v1
+    description: Development Server
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT访问令牌，格式为 "Bearer {token}"
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
+        pattern: '^[a-zA-Z0-9_-]+$'
+      description: |
+        幂等键，用于安全重试POST操作。
+        相同幂等键的请求在24小时内返回相同结果。
+      example: "req_abc123def456"
+
+    AsOfDate:
+      name: asOf
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date
+        pattern: '^\d{4}-\d{2}-\d{2}$'
+      description: |
+        时点查询参数，业务日期 (时区: Asia/Shanghai)
+        格式: YYYY-MM-DD，默认为当前交易日
+      example: "2024-01-15"
+
+    RequestId:
+      name: X-Request-ID
+      in: header
+      required: false
+      schema:
+        type: string
+        format: uuid
+      description: 请求追踪ID，用于链路跟踪
+      example: "123e4567-e89b-12d3-a456-426614174000"
+
+  headers:
+    SnapshotTimestamp:
+      description: 快照生成的真实时间戳 (ISO-8601格式)
+      schema:
+        type: string
+        format: date-time
+      example: "2024-01-15T10:30:45.123Z"
+
+    RequestId:
+      description: 请求追踪ID，用于链路跟踪
+      schema:
+        type: string
+        format: uuid
+      example: "123e4567-e89b-12d3-a456-426614174000"
+
+    RateLimitInfo:
+      description: 速率限制信息
+      schema:
+        type: object
+        properties:
+          limit:
+            type: integer
+            description: 速率限制上限
+          remaining:
+            type: integer
+            description: 剩余请求数
+          reset:
+            type: integer
+            description: 重置时间 (UTC秒级时间戳)
+        required: [limit, remaining, reset]
+
+  schemas:
+    # 基础类型
+    Currency:
+      type: string
+      enum: [CNY, HKD]
+      description: 货币类型
+      example: "CNY"
+
+    Market:
+      type: string
+      enum: [A, H]
+      description: 市场类型 (A股/H股)
+      example: "A"
+
+    Tier:
+      type: string
+      enum: [A, B, C]
+      description: 投资组合分层
+      example: "A"
+
+    AlertType:
+      type: string
+      enum: [event, kpi, trend, drawdown]
+      description: 告警类型
+      example: "trend"
+
+    Severity:
+      type: string
+      enum: [P1, P2, P3]
+      description: 严重程度
+      example: "P2"
+
+    # 评分相关
+    IndustryScore:
+      type: object
+      description: 行业评分
+      properties:
+        industry_id:
+          type: string
+          description: 行业ID
+          example: "semiconductor"
+        industry_name:
+          type: string
+          description: 行业名称
+          example: "半导体"
+        overall_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          description: 总评分
+          example: 78.5
+        policy_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          description: 政策评分 (P)
+          example: 85.0
+        execution_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          description: 落地评分 (E)
+          example: 75.0
+        market_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          description: 市场评分 (M)
+          example: 72.0
+        risk_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          description: 风险评分 (R-)
+          example: 20.0
+        breakdown:
+          type: object
+          description: 评分分解
+          properties:
+            P_weighted:
+              type: number
+              format: float
+            E_weighted:
+              type: number
+              format: float
+            M_weighted:
+              type: number
+              format: float
+            R_weighted:
+              type: number
+              format: float
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          description: 置信度
+          example: 92.5
+        meets_threshold:
+          type: boolean
+          description: 是否达到入池门槛 (>=70)
+          example: true
+        is_core_candidate:
+          type: boolean
+          description: 是否为核心候选 (>=75)
+          example: true
+        evidence_count:
+          type: integer
+          minimum: 0
+          description: 证据数量
+          example: 5
+        as_of:
+          type: string
+          format: date
+          description: 业务日期
+          example: "2024-01-15"
+        calculated_at:
+          type: string
+          format: date-time
+          description: 计算时间戳
+          example: "2024-01-15T10:30:45Z"
+      required:
+        - industry_id
+        - industry_name
+        - overall_score
+        - policy_score
+        - execution_score
+        - market_score
+        - risk_score
+        - confidence
+        - meets_threshold
+        - is_core_candidate
+
+    EquityScore:
+      type: object
+      description: 个股评分
+      properties:
+        equity_id:
+          type: string
+          description: 股票ID
+          example: "600519"
+        ticker:
+          type: string
+          description: 股票代码
+          example: "600519.SH"
+        company_name:
+          type: string
+          description: 公司名称
+          example: "贵州茅台"
+        overall_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          description: 总评分
+          example: 82.3
+        quality_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          description: 质量评分 (Q, 权重30%)
+          example: 88.0
+        valuation_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          description: 估值评分 (V, 权重20%)
+          example: 65.0
+        momentum_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          description: 动量评分 (M, 权重25%)
+          example: 78.0
+        catalyst_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          description: 催化评分 (C, 权重15%)
+          example: 85.0
+        share_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          description: 份额评分 (S, 权重10%)
+          example: 90.0
+        red_flag_penalty:
+          type: number
+          format: float
+          minimum: 0
+          description: 红旗扣分
+          example: 0.0
+        breakdown:
+          type: object
+          description: 评分分解
+          properties:
+            Q_weighted:
+              type: number
+              format: float
+            V_weighted:
+              type: number
+              format: float
+            M_weighted:
+              type: number
+              format: float
+            C_weighted:
+              type: number
+              format: float
+            S_weighted:
+              type: number
+              format: float
+            R_neg_penalty:
+              type: number
+              format: float
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          description: 置信度
+          example: 89.7
+        has_red_flags:
+          type: boolean
+          description: 是否有红旗
+          example: false
+        red_flags:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              severity:
+                type: string
+              description:
+                type: string
+              score_impact:
+                type: number
+        meets_observe_threshold:
+          type: boolean
+          description: 达到观察门槛 (>=65且无红旗)
+          example: true
+        meets_build_threshold:
+          type: boolean
+          description: 达到建仓门槛 (>=70且无红旗)
+          example: true
+        evidence_count:
+          type: integer
+          minimum: 0
+          description: 证据数量
+          example: 8
+      required:
+        - equity_id
+        - ticker
+        - company_name
+        - overall_score
+        - quality_score
+        - valuation_score
+        - momentum_score
+        - catalyst_score
+        - share_score
+        - confidence
+        - has_red_flags
+        - meets_observe_threshold
+        - meets_build_threshold
+
+    # 四闸门相关
+    GateCheckResult:
+      type: object
+      description: 四闸门校验结果
+      properties:
+        overall_pass:
+          type: boolean
+          description: 总体是否通过
+          example: true
+        failed_gates:
+          type: array
+          items:
+            type: string
+            enum: [industry, company, valuation, execution]
+          description: 未通过的闸门
+          example: []
+        gates:
+          type: object
+          description: 各闸门详细结果
+          properties:
+            industry:
+              $ref: '#/components/schemas/SingleGateResult'
+            company:
+              $ref: '#/components/schemas/SingleGateResult'
+            valuation:
+              $ref: '#/components/schemas/SingleGateResult'
+            execution:
+              $ref: '#/components/schemas/SingleGateResult'
+        summary:
+          type: object
+          properties:
+            total_gates:
+              type: integer
+              example: 4
+            passed_gates:
+              type: integer
+              example: 4
+            pass_rate:
+              type: number
+              format: float
+              example: 1.0
+        checked_at:
+          type: string
+          format: date-time
+          description: 校验时间
+          example: "2024-01-15T10:30:45Z"
+      required:
+        - overall_pass
+        - failed_gates
+        - gates
+        - summary
+        - checked_at
+
+    SingleGateResult:
+      type: object
+      description: 单个闸门结果
+      properties:
+        gate_name:
+          type: string
+          enum: [industry, company, valuation, execution]
+          description: 闸门名称
+          example: "industry"
+        pass:
+          type: boolean
+          description: 是否通过
+          example: true
+        score:
+          type: number
+          format: float
+          description: 相关评分
+          example: 78.5
+        threshold:
+          type: number
+          format: float
+          description: 门槛值
+          example: 70.0
+        margin:
+          type: number
+          format: float
+          description: 超出门槛的幅度
+          example: 8.5
+        message:
+          type: string
+          description: 结果说明
+          example: "行业评分达标"
+        details:
+          type: object
+          description: 详细信息
+      required:
+        - gate_name
+        - pass
+        - message
+
+    # 流动性相关
+    LiquidityCheckRequest:
+      type: object
+      description: 流动性校验请求
+      properties:
+        ticker:
+          type: string
+          description: 股票代码
+          example: "600519.SH"
+        target_position:
+          type: number
+          format: float
+          minimum: 0
+          description: 目标仓位金额
+          example: 500000.0
+        currency:
+          $ref: '#/components/schemas/Currency'
+        ADV20:
+          type: number
+          format: float
+          minimum: 0
+          description: 20日平均日成交额
+          example: 250000000.0
+        turnover:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: 日换手率
+          example: 0.006
+        freeFloatMktCap:
+          type: number
+          format: float
+          minimum: 0
+          description: 自由流通市值
+          example: 120000000000.0
+        r:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: 参与率 (可选，默认按市场设置)
+          example: 0.08
+        D:
+          type: integer
+          minimum: 1
+          description: 退出天数
+          example: 5
+      required:
+        - ticker
+        - target_position
+        - currency
+        - ADV20
+        - turnover
+        - freeFloatMktCap
+        - D
+
+    LiquidityCheckResponse:
+      type: object
+      description: 流动性校验响应
+      properties:
+        advMin:
+          type: number
+          format: float
+          description: 最小成交额要求
+          example: 140000.0
+        absoluteFloorPass:
+          type: boolean
+          description: 绝对底线是否通过
+          example: true
+        freeFloatCapPass:
+          type: boolean
+          description: 自由流通占用是否通过
+          example: true
+        usedParticipationRate:
+          type: number
+          format: float
+          description: 使用的参与率 (回显)
+          example: 0.08
+        usedExitDays:
+          type: integer
+          description: 使用的退出天数 (回显)
+          example: 5
+        freeFloatUtilizationPct:
+          type: number
+          format: float
+          description: 自由流通占用占比 (%)
+          example: 0.42
+        notes:
+          type: array
+          items:
+            type: string
+          description: 说明信息
+          example: ["A股绝对底线通过", "自由流通占用在合理范围内"]
+      required:
+        - advMin
+        - absoluteFloorPass
+        - freeFloatCapPass
+        - usedParticipationRate
+        - usedExitDays
+        - freeFloatUtilizationPct
+        - notes
+
+    # 组合相关
+    PortfolioConstructRequest:
+      type: object
+      description: 组合构建请求
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: 组合名称
+          example: "稳健成长组合"
+        description:
+          type: string
+          maxLength: 1000
+          description: 组合描述
+          example: "基于四闸门方法论的A/B/C分层投资组合"
+        capital:
+          type: number
+          format: float
+          minimum: 100000
+          description: 初始资金
+          example: 5000000.0
+        leverageMax:
+          type: number
+          format: float
+          minimum: 1.0
+          maximum: 2.0
+          description: 最大杠杆率
+          example: 1.1
+        tiers:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                $ref: '#/components/schemas/Tier'
+              targetPct:
+                type: array
+                items:
+                  type: number
+                  format: float
+                  minimum: 0
+                  maximum: 1
+                minItems: 2
+                maxItems: 2
+                description: 目标权重区间 [最小值, 最大值]
+                example: [0.12, 0.15]
+            required:
+              - name
+              - targetPct
+          minItems: 1
+          description: 分层配置
+          example:
+            - name: "A"
+              targetPct: [0.12, 0.15]
+            - name: "B"
+              targetPct: [0.08, 0.10]
+            - name: "C"
+              targetPct: [0.03, 0.05]
+        candidates:
+          type: array
+          items:
+            type: object
+            properties:
+              ticker:
+                type: string
+                description: 股票代码
+                example: "600519.SH"
+              tier:
+                $ref: '#/components/schemas/Tier'
+              score:
+                type: number
+                format: float
+                minimum: 0
+                maximum: 100
+                description: 评分
+                example: 82.3
+            required:
+              - ticker
+              - tier
+              - score
+          description: 候选股票列表
+      required:
+        - name
+        - capital
+        - leverageMax
+        - tiers
+        - candidates
+
+    PortfolioConstructResponse:
+      type: object
+      description: 组合构建响应
+      properties:
+        portfolio_id:
+          type: string
+          format: uuid
+          description: 组合ID
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        positions:
+          type: array
+          items:
+            type: object
+            properties:
+              ticker:
+                type: string
+              tier:
+                $ref: '#/components/schemas/Tier'
+              weight:
+                type: number
+                format: float
+                minimum: 0
+                maximum: 1
+              amount:
+                type: number
+                format: float
+                minimum: 0
+              shares:
+                type: integer
+                minimum: 0
+              entry_price:
+                type: number
+                format: float
+                minimum: 0
+          description: 持仓清单
+        entryPlan:
+          type: array
+          items:
+            type: object
+            properties:
+              leg:
+                type: integer
+                enum: [1, 2, 3]
+                description: 建仓批次
+                example: 1
+              amount:
+                type: number
+                format: float
+                minimum: 0
+                description: 建仓金额 (默认币种)
+                example: 200000.0
+              condition:
+                type: string
+                description: 建仓条件
+                example: ">=200DMA"
+            required:
+              - leg
+              - amount
+              - condition
+          description: 三段式建仓计划
+        circuitBreaker:
+          type: object
+          properties:
+            level:
+              type: string
+              enum: [L0, L1, L2, L3]
+              description: 断路器级别
+              example: "L0"
+            armed:
+              type: boolean
+              description: 是否布防
+              example: true
+          required:
+            - level
+            - armed
+          description: 断路器状态
+      required:
+        - portfolio_id
+        - positions
+        - entryPlan
+        - circuitBreaker
+
+    # 错误响应
+    ErrorResponse:
+      type: object
+      description: 错误响应
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              description: 错误代码
+              example: "VALIDATION_ERROR"
+            message:
+              type: string
+              description: 错误消息
+              example: "参数验证失败"
+            details:
+              type: object
+              description: 详细错误信息
+            request_id:
+              type: string
+              format: uuid
+              description: 请求ID
+              example: "123e4567-e89b-12d3-a456-426614174000"
+          required:
+            - code
+            - message
+        timestamp:
+          type: string
+          format: date-time
+          description: 错误时间
+          example: "2024-01-15T10:30:45Z"
+      required:
+        - error
+        - timestamp
+
+    ValidationError:
+      type: object
+      description: 参数验证错误
+      allOf:
+        - $ref: '#/components/schemas/ErrorResponse'
+        - properties:
+            error:
+              properties:
+                code:
+                  enum: ["VALIDATION_ERROR"]
+                details:
+                  type: object
+                  properties:
+                    field_errors:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          field:
+                            type: string
+                          message:
+                            type: string
+                        required:
+                          - field
+                          - message
+
+  responses:
+    BadRequest:
+      description: 请求参数错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationError'
+
+    Unauthorized:
+      description: 未授权访问
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: "UNAUTHORIZED"
+              message: "访问令牌无效或已过期"
+              request_id: "123e4567-e89b-12d3-a456-426614174000"
+            timestamp: "2024-01-15T10:30:45Z"
+
+    Forbidden:
+      description: 权限不足
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: "FORBIDDEN"
+              message: "当前用户无权限执行此操作"
+              request_id: "123e4567-e89b-12d3-a456-426614174000"
+            timestamp: "2024-01-15T10:30:45Z"
+
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: "NOT_FOUND"
+              message: "请求的资源不存在"
+              request_id: "123e4567-e89b-12d3-a456-426614174000"
+            timestamp: "2024-01-15T10:30:45Z"
+
+    Conflict:
+      description: 幂等键冲突
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: "IDEMPOTENCY_CONFLICT"
+              message: "幂等键已存在，请检查请求内容"
+              request_id: "123e4567-e89b-12d3-a456-426614174000"
+            timestamp: "2024-01-15T10:30:45Z"
+
+    UnprocessableEntity:
+      description: 语义校验失败
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: "BUSINESS_RULE_VIOLATION"
+              message: "业务规则校验失败"
+              details:
+                rule: "四闸门校验"
+                failed_gates: ["valuation"]
+              request_id: "123e4567-e89b-12d3-a456-426614174000"
+            timestamp: "2024-01-15T10:30:45Z"
+
+    TooManyRequests:
+      description: 速率限制命中
+      headers:
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/RateLimitInfo/schema/properties/limit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimitInfo/schema/properties/remaining'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/RateLimitInfo/schema/properties/reset'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: "RATE_LIMIT_EXCEEDED"
+              message: "请求频率过高，请稍后重试"
+              request_id: "123e4567-e89b-12d3-a456-426614174000"
+            timestamp: "2024-01-15T10:30:45Z"
+
+    ServiceUnavailable:
+      description: 下游服务不可用
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: "DOWNSTREAM_UNAVAILABLE"
+              message: "依赖服务暂时不可用"
+              request_id: "123e4567-e89b-12d3-a456-426614174000"
+            timestamp: "2024-01-15T10:30:45Z"
+
+# API路径定义开始
+paths:
+  # 四闸门校验
+  /gatekeeper/check:
+    post:
+      tags:
+        - "四闸门校验"
+      summary: "执行四闸门完整校验"
+      description: |
+        基于四闸门方法论执行完整校验:
+        1. Gate-Industry: 行业分达标，处"落地/兑现期"
+        2. Gate-Company: 个股分达标，无红旗
+        3. Gate-Valuation: 相对自身5年分位≤70% (成长股≤80%，且PEG≤1.5)
+        4. Gate-Execution: 价格在200DMA上，支持三段式建仓
+      operationId: checkFourGates
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - industry_score
+                - equity_score
+                - above_200dma
+              properties:
+                industry_score:
+                  type: number
+                  format: float
+                  minimum: 0
+                  maximum: 100
+                  description: 行业评分
+                  example: 78.5
+                equity_score:
+                  type: number
+                  format: float
+                  minimum: 0
+                  maximum: 100
+                  description: 个股评分
+                  example: 72.3
+                valuation_percentile:
+                  type: number
+                  format: float
+                  minimum: 0
+                  maximum: 1
+                  description: 估值分位数 (0-1)
+                  example: 0.65
+                above_200dma:
+                  type: boolean
+                  description: 是否在200日均线上方
+                  example: true
+                peg:
+                  type: number
+                  format: float
+                  minimum: 0
+                  description: PEG比率 (可选，成长股必需)
+                  example: 1.2
+                is_growth_stock:
+                  type: boolean
+                  description: 是否为成长股
+                  default: false
+                  example: false
+                additional_context:
+                  type: object
+                  description: 额外上下文信息
+                  example:
+                    ticker: "600519.SH"
+                    sector: "消费品"
+      responses:
+        '200':
+          description: 校验结果
+          headers:
+            X-Snapshot-Ts:
+              $ref: '#/components/headers/SnapshotTimestamp'
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GateCheckResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  # 流动性校验
+  /liquidity/check:
+    post:
+      tags:
+        - "流动性管理"
+      summary: "执行流动性校验"
+      description: |
+        校验目标仓位的流动性可行性，包括:
+        - 参与率校验 (A股10%, H股8%)
+        - 退出天数校验 (核心5天, 战术3天)
+        - 绝对底线校验 (A股ADV20≥3000万, H股≥2000万)
+        - 自由流通占用校验 (≤2%)
+        
+        **回显字段**: usedParticipationRate, usedExitDays, freeFloatUtilizationPct
+      operationId: checkLiquidity
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiquidityCheckRequest'
+            example:
+              ticker: "600519.SH"
+              target_position: 500000
+              currency: "CNY"
+              ADV20: 250000000
+              turnover: 0.006
+              freeFloatMktCap: 120000000000
+              r: 0.08
+              D: 5
+      responses:
+        '200':
+          description: 流动性校验结果
+          headers:
+            X-Snapshot-Ts:
+              $ref: '#/components/headers/SnapshotTimestamp'
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiquidityCheckResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  # 组合构建
+  /portfolio/construct:
+    post:
+      tags:
+        - "投资组合"
+      summary: "构建投资组合"
+      description: |
+        基于A/B/C分层策略构建投资组合:
+        - A层 (核心): 12-15% 权重
+        - B层 (重要): 8-10% 权重  
+        - C层 (战术): 3-5% 权重
+        
+        自动执行四闸门校验和流动性校验，生成三段式建仓计划。
+        
+        **回显字段**: 建仓计划包含leg, amount, condition
+      operationId: constructPortfolio
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PortfolioConstructRequest'
+            example:
+              name: "稳健成长组合"
+              description: "基于四闸门方法论的长期投资组合"
+              capital: 5000000
+              leverageMax: 1.1
+              tiers:
+                - name: "A"
+                  targetPct: [0.12, 0.15]
+                - name: "B"
+                  targetPct: [0.08, 0.10]
+                - name: "C"
+                  targetPct: [0.03, 0.05]
+              candidates:
+                - ticker: "600519.SH"
+                  tier: "A"
+                  score: 82.3
+                - ticker: "0700.HK"
+                  tier: "A"
+                  score: 78.9
+      responses:
+        '200':
+          description: 组合构建成功
+          headers:
+            X-Snapshot-Ts:
+              $ref: '#/components/headers/SnapshotTimestamp'
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortfolioConstructResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  # 行业评分查询
+  /scoring/industries:
+    get:
+      tags:
+        - "评分引擎"
+      summary: "查询行业评分列表"
+      description: |
+        获取行业评分列表，支持时间旅行查询。
+        
+        评分公式: Score^{Ind} = 0.35P + 0.25E + 0.25M + 0.15×(100-R^{-})
+      operationId: getIndustryScores
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AsOfDate'
+        - $ref: '#/components/parameters/RequestId'
+        - name: min_score
+          in: query
+          schema:
+            type: number
+            format: float
+            minimum: 0
+            maximum: 100
+          description: 最低评分筛选
+          example: 70
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: 结果数量限制
+          example: 20
+      responses:
+        '200':
+          description: 行业评分列表
+          headers:
+            X-Snapshot-Ts:
+              $ref: '#/components/headers/SnapshotTimestamp'
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IndustryScore'
+                  pagination:
+                    type: object
+                    properties:
+                      total_count:
+                        type: integer
+                      page:
+                        type: integer
+                      page_size:
+                        type: integer
+                required:
+                  - data
+                  - pagination
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  # 个股评分查询
+  /scoring/equities:
+    get:
+      tags:
+        - "评分引擎"
+      summary: "查询个股评分列表"
+      description: |
+        获取个股评分列表，支持时间旅行查询。
+        
+        评分权重: Q(30%) + V(20%) + M(25%) + C(15%) + S(10%) - R^{-}
+      operationId: getEquityScores
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AsOfDate'
+        - $ref: '#/components/parameters/RequestId'
+        - name: min_score
+          in: query
+          schema:
+            type: number
+            format: float
+            minimum: 0
+            maximum: 100
+          description: 最低评分筛选
+          example: 65
+        - name: no_red_flags
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: 是否排除有红旗的股票
+          example: true
+        - name: market
+          in: query
+          schema:
+            $ref: '#/components/schemas/Market'
+          description: 市场筛选 (A股/H股)
+          example: "A"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: 结果数量限制
+          example: 50
+      responses:
+        '200':
+          description: 个股评分列表
+          headers:
+            X-Snapshot-Ts:
+              $ref: '#/components/headers/SnapshotTimestamp'
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EquityScore'
+                  pagination:
+                    type: object
+                    properties:
+                      total_count:
+                        type: integer
+                      page:
+                        type: integer
+                      page_size:
+                        type: integer
+                required:
+                  - data
+                  - pagination
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: "四闸门校验"
+    description: "四闸门投资决策校验"
+  - name: "评分引擎"
+    description: "行业和个股评分系统"
+  - name: "流动性管理"
+    description: "流动性和容量校验"
+  - name: "投资组合"
+    description: "投资组合构建和管理"
+
+externalDocs:
+  description: "InvestIQ Platform 完整文档"
+  url: "https://docs.investiq.platform"

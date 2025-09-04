@@ -1,21 +1,41 @@
 """
 InvestIQ Platform - 四闸门校验API端点
 投资决策四闸门校验服务的REST API
+符合OpenAPI v1.1.1-final规范
 """
 
-from datetime import datetime
+from datetime import datetime, date
+import uuid
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, Header
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, Response
+from pydantic import BaseModel, Field, validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.database import get_db
 from backend.app.core.logging import get_logger
+from backend.app.core.exceptions import ValidationException, IdempotencyException
 from backend.app.services.gatekeeper import gatekeeper, entry_plan_generator
+from backend.app.services.idempotency_service import IdempotencyService
 
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+# 创建幂等性服务实例
+idempotency_service = IdempotencyService()
+
+
+# 错误响应模型
+class ErrorResponse(BaseModel):
+    """标准错误响应"""
+    error: Dict[str, Any] = Field(..., description="错误信息")
+    timestamp: datetime = Field(default_factory=datetime.utcnow, description="错误时间")
+
+
+class ValidationErrorDetail(BaseModel):
+    """验证错误详情"""
+    field: str = Field(..., description="字段名")
+    message: str = Field(..., description="错误信息")
 
 
 # Pydantic模型定义
@@ -29,6 +49,13 @@ class GateCheckRequest(BaseModel):
     is_growth_stock: bool = Field(False, description="是否为成长股")
     additional_context: Optional[Dict[str, Any]] = Field(None, description="额外上下文")
 
+    @validator('peg')
+    def validate_peg_for_growth_stock(cls, v, values):
+        """成长股必须提供PEG"""
+        if values.get('is_growth_stock', False) and v is None:
+            raise ValueError('成长股必须提供PEG比率')
+        return v
+
 
 class EntryPlanRequest(BaseModel):
     """建仓计划请求模型"""
@@ -38,19 +65,117 @@ class EntryPlanRequest(BaseModel):
     technical_data: Optional[Dict[str, Any]] = Field(None, description="技术分析数据")
     risk_tolerance: str = Field("medium", description="风险承受度 (low/medium/high)")
 
+    @validator('risk_tolerance')
+    def validate_risk_tolerance(cls, v):
+        """验证风险承受度"""
+        if v not in ['low', 'medium', 'high']:
+            raise ValueError('风险承受度必须为 low, medium 或 high')
+        return v
+
 
 class BatchGateCheckRequest(BaseModel):
     """批量四闸门校验请求模型"""
-    requests: List[GateCheckRequest] = Field(..., description="校验请求列表")
+    requests: List[GateCheckRequest] = Field(..., min_items=1, max_items=100, description="校验请求列表")
 
 
-class GateCheckResponse(BaseModel):
-    """四闸门校验响应模型"""
-    success: bool = Field(..., description="是否成功")
-    data: Optional[Dict[str, Any]] = Field(None, description="校验结果")
-    error: Optional[str] = Field(None, description="错误信息")
-    request_id: Optional[str] = Field(None, description="请求ID")
-    snapshot_ts: str = Field(..., description="快照时间戳")
+class SingleGateResult(BaseModel):
+    """单个闸门结果"""
+    gate_name: str = Field(..., description="闸门名称")
+    pass_: bool = Field(..., alias="pass", description="是否通过")
+    score: Optional[float] = Field(None, description="相关评分")
+    threshold: Optional[float] = Field(None, description="门槛值")
+    margin: Optional[float] = Field(None, description="超出门槛的幅度")
+    message: str = Field(..., description="结果说明")
+    details: Optional[Dict[str, Any]] = Field(None, description="详细信息")
+
+
+class GateCheckResult(BaseModel):
+    """四闸门校验结果"""
+    overall_pass: bool = Field(..., description="总体是否通过")
+    failed_gates: List[str] = Field(..., description="未通过的闸门")
+    gates: Dict[str, SingleGateResult] = Field(..., description="各闸门详细结果")
+    summary: Dict[str, Any] = Field(..., description="校验摘要")
+    checked_at: datetime = Field(..., description="校验时间")
+    thresholds_used: Dict[str, float] = Field(..., description="使用的阈值")
+
+
+# API响应包装器
+async def create_success_response(
+    data: Any,
+    request_id: Optional[str] = None,
+    snapshot_ts: Optional[datetime] = None
+) -> Dict[str, Any]:
+    """创建成功响应"""
+    return {
+        "data": data,
+        "request_id": request_id,
+        "snapshot_ts": (snapshot_ts or datetime.utcnow()).isoformat()
+    }
+
+
+async def create_error_response(
+    error_code: str,
+    message: str,
+    details: Optional[Dict[str, Any]] = None,
+    request_id: Optional[str] = None,
+    status_code: int = 500
+) -> HTTPException:
+    """创建错误响应"""
+    error_detail = {
+        "error": {
+            "code": error_code,
+            "message": message,
+            "details": details or {},
+            "request_id": request_id
+        },
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    return HTTPException(status_code=status_code, detail=error_detail)
+
+
+# 辅助函数
+async def process_with_idempotency(
+    idempotency_key: Optional[str],
+    operation_func,
+    request_data: Dict[str, Any],
+    request_id: Optional[str] = None
+) -> Any:
+    """处理带幂等性的操作"""
+    if not idempotency_key:
+        # 没有幂等键，直接执行
+        return await operation_func()
+    
+    try:
+        # 检查幂等键
+        existing_result = await idempotency_service.get_result(idempotency_key)
+        if existing_result:
+            logger.info(f"Returning cached result for idempotency key: {idempotency_key}")
+            return existing_result
+        
+        # 执行操作
+        result = await operation_func()
+        
+        # 缓存结果
+        await idempotency_service.store_result(idempotency_key, result, request_data)
+        
+        return result
+        
+    except IdempotencyException as e:
+        raise await create_error_response(
+            error_code="IDEMPOTENCY_CONFLICT",
+            message="幂等键冲突，请检查请求内容",
+            details={"idempotency_key": idempotency_key},
+            request_id=request_id,
+            status_code=409
+        )
+
+
+def add_response_headers(response: Response, request_id: Optional[str], snapshot_ts: datetime):
+    """添加响应头"""
+    if request_id:
+        response.headers["X-Request-ID"] = request_id
+    response.headers["X-Snapshot-Ts"] = snapshot_ts.isoformat()
+    response.headers["Content-Type"] = "application/json; charset=utf-8"
 
 
 # API端点定义
