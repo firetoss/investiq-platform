@@ -1,0 +1,154 @@
+# InvestIQ Platform - 开发环境配置
+# 支持Docker容器中开发，代码热重载，调试支持
+
+version: '3.8'
+
+services:
+  # 开发主应用 (支持热重载和调试)
+  investiq-dev:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.jetson
+      target: development
+    container_name: investiq-dev
+    ports:
+      - "8000:8000"    # 主应用端口
+      - "5678:5678"    # Python调试端口
+    volumes:
+      # 代码热重载 - 挂载源代码
+      - .:/app:cached
+      - /app/.uv       # 缓存uv依赖，避免重复安装
+      - dev_logs:/app/logs
+    environment:
+      # 开发环境配置
+      - PYTHONPATH=/app
+      - FASTAPI_ENV=development
+      - LOG_LEVEL=DEBUG
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+      
+      # Jetson硬件配置 (开发环境可能不需要)
+      - NVIDIA_VISIBLE_DEVICES=0
+      - CUDA_VISIBLE_DEVICES=0
+      - DLA_CORES=2
+      - CPU_CORES=12
+      
+      # 数据库连接 (开发环境)
+      - DATABASE_URL=postgresql://investiq:dev123@postgres-dev:5432/investiq_dev
+      - REDIS_URL=redis://redis-dev:6379/0
+      
+      # AI服务URL (开发环境可以使用mock或本地服务)
+      - LLM_SERVICE_URL=http://localhost:8001
+      - SENTIMENT_SERVICE_URL=http://localhost:8002
+      - TIMESERIES_SERVICE_URL=http://localhost:8003
+      - CPU_TIMESERIES_SERVICE_URL=http://localhost:8004
+      
+      # 开发工具配置
+      - ENABLE_DEBUG=true
+      - ENABLE_PROFILING=true
+      
+    depends_on:
+      - postgres-dev
+      - redis-dev
+    networks:
+      - investiq-dev-network
+    restart: unless-stopped
+    # 开发环境不需要GPU，可以在普通机器上开发
+    # runtime: nvidia  # 注释掉，开发时可选
+
+  # 开发数据库 (轻量配置)
+  postgres-dev:
+    image: postgres:15-alpine
+    container_name: investiq-postgres-dev
+    environment:
+      - POSTGRES_DB=investiq_dev
+      - POSTGRES_USER=investiq
+      - POSTGRES_PASSWORD=dev123
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+      - ./deploy/docker/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    ports:
+      - "5433:5432"  # 避免与本地PostgreSQL冲突
+    networks:
+      - investiq-dev-network
+    restart: unless-stopped
+
+  # 开发Redis
+  redis-dev:
+    image: redis:7-alpine
+    container_name: investiq-redis-dev
+    ports:
+      - "6380:6379"  # 避免与本地Redis冲突
+    volumes:
+      - redis_dev_data:/data
+    networks:
+      - investiq-dev-network
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+  # 开发MinIO (对象存储)
+  minio-dev:
+    image: minio/minio:latest
+    container_name: investiq-minio-dev
+    ports:
+      - "9001:9000"  # API端口
+      - "9002:9001"  # 控制台端口
+    volumes:
+      - minio_dev_data:/data
+    environment:
+      - MINIO_ROOT_USER=investiq
+      - MINIO_ROOT_PASSWORD=dev123456
+    networks:
+      - investiq-dev-network
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+
+  # 开发工具容器 (包含各种开发工具)
+  dev-tools:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.jetson
+      target: development
+    container_name: investiq-dev-tools
+    volumes:
+      - .:/app:cached
+    environment:
+      - PYTHONPATH=/app
+    networks:
+      - investiq-dev-network
+    restart: unless-stopped
+    command: tail -f /dev/null  # 保持容器运行
+
+# 开发网络
+networks:
+  investiq-dev-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
+
+# 开发数据卷
+volumes:
+  postgres_dev_data:
+    driver: local
+  redis_dev_data:
+    driver: local
+  minio_dev_data:
+    driver: local
+  jupyter_notebooks:
+    driver: local
+  dev_logs:
+    driver: local
+
+# 开发环境扩展配置
+x-development-defaults: &dev-defaults
+  networks:
+    - investiq-dev-network
+  restart: unless-stopped
+  
+x-logging-dev: &dev-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
