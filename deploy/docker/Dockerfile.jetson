@@ -1,0 +1,120 @@
+# InvestIQ主应用Dockerfile - 纯微服务架构
+# 仅包含API网关、业务逻辑、数据库操作
+# AI功能通过HTTP调用独立的dustynv服务
+
+# 基础镜像 - 仅用于主应用
+FROM dustynv/pytorch:2.1-r36.4.4 as final
+
+# 设置工作目录
+WORKDIR /app
+
+# 设置环境变量 - Jetson Orin AGX优化
+ENV PYTHONPATH=/app
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Jetson硬件优化环境变量
+ENV NVIDIA_VISIBLE_DEVICES=0
+ENV CUDA_VISIBLE_DEVICES=0
+ENV NVIDIA_DRIVER_CAPABILITIES=all
+
+# DLA优化环境变量
+ENV DLA_ENABLE=1
+ENV DLA_CORES=2
+
+# CUDA优化环境变量
+ENV CUDA_CACHE_DISABLE=0
+ENV CUDA_CACHE_MAXSIZE=2147483648
+ENV LLAMA_CUBLAS=1
+
+# TensorRT优化环境变量
+ENV TRT_LIBPATH=/usr/lib/aarch64-linux-gnu
+ENV LD_LIBRARY_PATH=${TRT_LIBPATH}:${LD_LIBRARY_PATH}
+ENV TRT_LOGGER_LEVEL=WARNING
+
+# PyTorch优化环境变量
+ENV TORCH_CUDNN_V8_API_ENABLED=1
+ENV TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1
+
+# 安装项目依赖
+COPY pyproject.toml uv.lock* ./
+
+# 安装uv包管理器 (如果镜像中没有)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh || echo "uv already installed"
+ENV PATH="/root/.cargo/bin:$PATH"
+
+# 安装Python依赖 (仅主应用需要的依赖，不包含AI模型库)
+RUN uv sync --no-dev
+
+# 安装主应用需要的额外库
+RUN pip install --no-cache-dir \
+    httpx \
+    aiohttp \
+    feedparser \
+    aiofiles
+
+# 创建必要的目录 (仅主应用需要)
+RUN mkdir -p \
+    /app/logs \
+    /app/tmp \
+    /app/data
+
+# 复制应用代码 (仅主应用，不包含AI模型)
+COPY backend/ ./backend/
+COPY data/ ./data/
+
+# 设置目录权限
+RUN chmod -R 755 /app/logs /app/tmp /app/data
+
+# 验证主应用依赖
+RUN python -c "import fastapi; print(f'FastAPI version: {fastapi.__version__}')" && \
+    python -c "import httpx; print(f'HTTPX available for service communication')" && \
+    python -c "import sqlalchemy; print(f'SQLAlchemy available for database')"
+
+# 暴露端口
+EXPOSE 8000
+
+# 健康检查 - 增强版
+HEALTHCHECK --interval=30s --timeout=30s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/health || \
+        curl -f http://localhost:8000/api/v1/performance/health || \
+        exit 1
+
+# 开发阶段
+FROM final as development
+
+# 安装开发依赖
+RUN uv sync --dev --extra gpu
+
+# 设置开发环境变量
+ENV FASTAPI_ENV=development
+ENV LOG_LEVEL=DEBUG
+
+# 开发启动命令
+CMD ["uv", "run", "uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+# 生产阶段
+FROM final as production
+
+# 创建非root用户 (安全考虑)
+RUN groupadd -r investiq && useradd -r -g investiq investiq
+
+# 设置文件所有权
+RUN chown -R investiq:investiq /app /models
+
+# 切换到非root用户
+USER investiq
+
+# 设置生产环境变量
+ENV FASTAPI_ENV=production
+ENV LOG_LEVEL=INFO
+
+# 生产启动命令 - 多进程
+CMD ["uv", "run", "gunicorn", "backend.app.main:app", \
+     "-w", "4", \
+     "-k", "uvicorn.workers.UvicornWorker", \
+     "--bind", "0.0.0.0:8000", \
+     "--worker-connections", "1000", \
+     "--max-requests", "10000", \
+     "--max-requests-jitter", "1000", \
+     "--preload"]

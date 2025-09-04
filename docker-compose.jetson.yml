@@ -1,0 +1,374 @@
+# InvestIQ Platform - Jetson Orin AGX优化部署配置
+# 支持GPU+2DLA+CPU四重并行计算架构
+# 基于dustynv预优化镜像，JetPack 36.4.4
+
+version: '3.8'
+
+services:
+  # 主应用服务 (API网关 + 业务逻辑)
+  investiq-app:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.jetson
+      target: production
+    container_name: investiq-app
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/models:ro
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    environment:
+      # 基础环境
+      - PYTHONPATH=/app
+      - FASTAPI_ENV=production
+      - LOG_LEVEL=INFO
+      
+      # Jetson硬件配置
+      - NVIDIA_VISIBLE_DEVICES=0
+      - CUDA_VISIBLE_DEVICES=0
+      - DLA_CORES=2
+      - CPU_CORES=12
+      
+      # 服务发现
+      - LLM_SERVICE_URL=http://llm-service:8001
+      - SENTIMENT_SERVICE_URL=http://sentiment-service:8002
+      - TIMESERIES_SERVICE_URL=http://timeseries-service:8003
+      - CPU_TIMESERIES_SERVICE_URL=http://cpu-timeseries:8004
+      
+      # 数据库连接
+      - DATABASE_URL=postgresql://investiq:investiq123@postgres:5432/investiq
+      - REDIS_URL=redis://redis:6379/0
+      
+    depends_on:
+      - postgres
+      - redis
+      - llm-service
+      - sentiment-service
+      - timeseries-service
+      - cpu-timeseries
+    networks:
+      - investiq-network
+    restart: unless-stopped
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [gpu, compute, utility]
+
+  # LLM服务 (GPU专用 - Qwen3-8B INT8)
+  llm-service:
+    image: dustynv/llama.cpp:r36.4.4
+    container_name: investiq-llm
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./models:/models:ro
+      - ./logs:/app/logs
+    environment:
+      # GPU专用配置
+      - NVIDIA_VISIBLE_DEVICES=0
+      - CUDA_VISIBLE_DEVICES=0
+      - LLAMA_CUBLAS=1
+      
+      # 模型配置 - Jetson Orin AGX优化
+      - LLAMA_N_GPU_LAYERS=35
+      - LLAMA_N_CTX=8192
+      - LLAMA_N_THREADS=8
+      - LLAMA_USE_MLOCK=1
+      - LLAMA_USE_MMAP=1
+      
+      # 模型路径
+      - MODEL_PATH=/models/Qwen3-8B-INT8.gguf
+      - MODEL_TYPE=llm
+      
+    networks:
+      - investiq-network
+    restart: unless-stopped
+    runtime: nvidia
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [gpu, compute]
+    command: >
+      sh -c "
+        llama-server 
+        --model /models/Qwen3-8B-INT8.gguf 
+        --host 0.0.0.0 
+        --port 8000 
+        --n-gpu-layers 35 
+        --ctx-size 8192 
+        --threads 8
+        --mlock
+        --verbose
+      "
+
+  # 情感分析服务 (DLA核心0专用 - RoBERTa中文金融版)
+  sentiment-service:
+    image: dustynv/pytorch:2.1-r36.4.4
+    container_name: investiq-sentiment
+    ports:
+      - "8002:8000"
+    volumes:
+      - ./models:/models:ro
+      - ./backend/app/services:/app/services:ro
+      - ./logs:/app/logs
+    environment:
+      # DLA核心0专用配置
+      - NVIDIA_VISIBLE_DEVICES=0
+      - DLA_CORE=0
+      - DLA_ENABLE=1
+      
+      # 模型配置
+      - TORCH_DTYPE=float16
+      - BATCH_SIZE=32
+      - MAX_LENGTH=512
+      - MODEL_NAME=Jean-Baptiste/roberta-large-financial-news-sentiment-en
+      - MODEL_TYPE=sentiment
+      
+      # 性能优化
+      - TORCH_CUDNN_BENCHMARK=1
+      - TORCH_BACKENDS_CUDNN_DETERMINISTIC=0
+      
+    networks:
+      - investiq-network
+    restart: unless-stopped
+    runtime: nvidia
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [gpu, compute, utility]
+    command: python /app/services/sentiment_server.py
+
+  # 时序预测服务 (DLA核心1专用 - PatchTST金融版)
+  timeseries-service:
+    image: dustynv/pytorch:2.1-r36.4.4
+    container_name: investiq-timeseries
+    ports:
+      - "8003:8000"
+    volumes:
+      - ./models:/models:ro
+      - ./backend/app/services:/app/services:ro
+      - ./logs:/app/logs
+    environment:
+      # DLA核心1专用配置
+      - NVIDIA_VISIBLE_DEVICES=0
+      - DLA_CORE=1
+      - DLA_ENABLE=1
+      
+      # 模型配置
+      - TORCH_DTYPE=float16
+      - BATCH_SIZE=32
+      - CONTEXT_LENGTH=512
+      - PREDICTION_LENGTH=96
+      - PATCH_SIZE=16
+      - MODEL_NAME=ibm-granite/granite-timeseries-patchtst
+      - MODEL_TYPE=timeseries
+      
+      # 性能优化
+      - TORCH_CUDNN_BENCHMARK=1
+      
+    networks:
+      - investiq-network
+    restart: unless-stopped
+    runtime: nvidia
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [gpu, compute, utility]
+    command: python /app/services/timeseries_server.py
+
+  # CPU时序服务 (传统算法 + 轻量预测)
+  cpu-timeseries:
+    image: dustynv/pytorch:2.1-r36.4.4
+    container_name: investiq-cpu-timeseries
+    ports:
+      - "8004:8000"
+    volumes:
+      - ./backend/app/services:/app/services:ro
+      - ./logs:/app/logs
+    environment:
+      # CPU专用配置
+      - CUDA_VISIBLE_DEVICES=""
+      - OMP_NUM_THREADS=12
+      - MKL_NUM_THREADS=12
+      - NUMBA_NUM_THREADS=12
+      
+      # 算法配置
+      - ENABLE_CPU_OPTIMIZATION=true
+      - ENABLE_VECTORIZATION=true
+      - ALGORITHM_TYPES=arima,garch,technical_indicators
+      
+    networks:
+      - investiq-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '12'
+    command: python /app/services/cpu_timeseries_server.py
+
+  # PostgreSQL数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: investiq-postgres
+    environment:
+      - POSTGRES_DB=investiq
+      - POSTGRES_USER=investiq
+      - POSTGRES_PASSWORD=investiq123
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./deploy/docker/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - investiq-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  # Redis缓存
+  redis:
+    image: redis:7-alpine
+    container_name: investiq-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./deploy/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    networks:
+      - investiq-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    command: redis-server /usr/local/etc/redis/redis.conf
+
+  # MinIO对象存储 (证据文件)
+  minio:
+    image: minio/minio:latest
+    container_name: investiq-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    environment:
+      - MINIO_ROOT_USER=investiq
+      - MINIO_ROOT_PASSWORD=investiq123
+      - MINIO_BROWSER_REDIRECT_URL=http://localhost:9001
+    networks:
+      - investiq-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    command: server /data --console-address ":9001"
+
+  # Prometheus监控
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: investiq-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - investiq-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+
+  # Grafana可视化
+  grafana:
+    image: grafana/grafana:latest
+    container_name: investiq-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./deploy/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./deploy/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=investiq123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    networks:
+      - investiq-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+# 网络配置
+networks:
+  investiq-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# 数据卷
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  minio_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+# 扩展配置
+x-jetson-optimization: &jetson-optimization
+  runtime: nvidia
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            device_ids: ['0']
+            capabilities: [gpu, compute, utility]
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "100m"
+    max-file: "3"
