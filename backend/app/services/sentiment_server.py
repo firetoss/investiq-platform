@@ -1,6 +1,6 @@
 """
-情感分析服务器 - DLA核心0专用
-基于RoBERTa中文金融模型，优化批处理性能
+情感分析服务器 - GPU 专用
+基于小型中文BERT/RoBERTa模型，优化批处理性能
 """
 
 import os
@@ -61,10 +61,9 @@ async def load_model():
     
     try:
         model_name = os.getenv("MODEL_NAME", "IDEA-CCNL/Erlangshen-Roberta-330M-Sentiment")
-        dla_core = int(os.getenv("DLA_CORE", "0"))
         batch_size = int(os.getenv("BATCH_SIZE", "32"))
         
-        logger.info(f"Loading sentiment model: {model_name} on DLA core {dla_core}")
+        logger.info(f"Loading sentiment model: {model_name} on GPU if available")
         
         if not TRANSFORMERS_AVAILABLE:
             logger.error("Transformers not available")
@@ -72,33 +71,38 @@ async def load_model():
         
         # 设置设备
         if torch.cuda.is_available():
-            device = f"cuda:{dla_core}"
+            device_id = 0
             torch_dtype = torch.float16
+            device_arg = 0
         else:
-            device = "cpu"
+            device_id = -1
             torch_dtype = torch.float32
+            device_arg = -1
         
-        logger.info(f"Using device: {device}, dtype: {torch_dtype}")
+        logger.info(f"Using device_id: {device_id}, dtype: {torch_dtype}")
         
         # 加载模型和tokenizer
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = AutoModelForSequenceClassification.from_pretrained(
             model_name,
             torch_dtype=torch_dtype,
-            device_map={"": device}
         )
+        
+        # 移动到目标设备
+        if torch.cuda.is_available():
+            model = model.to("cuda:0")
         
         # 创建pipeline
         sentiment_model = pipeline(
             "text-classification",
             model=model,
             tokenizer=tokenizer,
-            device=device,
+            device=device_arg,
             batch_size=batch_size,
             return_all_scores=True
         )
         
-        # DLA优化设置
+        # GPU优化设置
         if torch.cuda.is_available():
             torch.backends.cudnn.benchmark = True
             torch.backends.cudnn.deterministic = False
@@ -108,7 +112,7 @@ async def load_model():
             _ = sentiment_model(dummy_texts)
             logger.info("Model warmup completed")
         
-        logger.info(f"Sentiment model loaded successfully on {device}")
+        logger.info("Sentiment model loaded successfully")
         return True
         
     except Exception as e:
@@ -141,8 +145,14 @@ async def analyze_sentiment(request: SentimentRequest) -> SentimentResponse:
         if sentiment_model is None:
             raise HTTPException(status_code=503, detail="Sentiment model not loaded")
         
-        # 执行批量分析
-        raw_results = sentiment_model(request.texts)
+        # 执行批量分析（开启截断/填充，控制序列长度）
+        max_len = int(os.getenv("MAX_LENGTH", "512"))
+        raw_results = sentiment_model(
+            request.texts,
+            truncation=True,
+            padding=True,
+            max_length=max_len,
+        )
         
         # 处理结果
         results = []

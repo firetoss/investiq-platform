@@ -34,7 +34,7 @@ services:
       # 服务发现
       - LLM_SERVICE_URL=http://llm-service:8001
       - SENTIMENT_SERVICE_URL=http://sentiment-service:8002
-      - TIMESERIES_SERVICE_URL=http://timeseries-service:8003
+      - TIMESERIES_SERVICE_URL=http://cpu-timeseries:8004
       - CPU_TIMESERIES_SERVICE_URL=http://cpu-timeseries:8004
       
       # 数据库连接
@@ -46,7 +46,6 @@ services:
       - redis
       - llm-service
       - sentiment-service
-      - timeseries-service
       - cpu-timeseries
     networks:
       - investiq-network
@@ -112,9 +111,11 @@ services:
         --verbose
       "
 
-  # 情感分析服务 (DLA核心0专用 - RoBERTa中文金融版)
+  # 情感分析服务 (GPU 专用 - 中文BERT/RoBERTa)
   sentiment-service:
-    image: dustynv/pytorch:2.1-r36.4.4
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.sentiment
     container_name: investiq-sentiment
     ports:
       - "8002:8000"
@@ -123,10 +124,9 @@ services:
       - ./backend/app/services:/app/services:ro
       - ./logs:/app/logs
     environment:
-      # DLA核心0专用配置
+      # GPU配置
       - NVIDIA_VISIBLE_DEVICES=0
-      - DLA_CORE=0
-      - DLA_ENABLE=1
+      - CUDA_VISIBLE_DEVICES=0
       
       # 模型配置
       - TORCH_DTYPE=float16
@@ -153,49 +153,6 @@ services:
               device_ids: ['0']
               capabilities: [gpu, compute, utility]
     command: python /app/services/sentiment_server.py
-
-  # 时序预测服务 (DLA核心1专用 - PatchTST金融版)
-  timeseries-service:
-    image: dustynv/pytorch:2.1-r36.4.4
-    container_name: investiq-timeseries
-    ports:
-      - "8003:8000"
-    volumes:
-      - ./models:/models:ro
-      - ./backend/app/services:/app/services:ro
-      - ./logs:/app/logs
-    environment:
-      # DLA核心1专用配置
-      - NVIDIA_VISIBLE_DEVICES=0
-      - DLA_CORE=1
-      - DLA_ENABLE=1
-      
-      # 模型配置
-      - TORCH_DTYPE=float16
-      - BATCH_SIZE=32
-      - CONTEXT_LENGTH=512
-      - PREDICTION_LENGTH=96
-      - PATCH_SIZE=16
-      - MODEL_NAME=ibm-granite/granite-timeseries-patchtst
-      - MODEL_TYPE=timeseries
-      
-      # 性能优化
-      - TORCH_CUDNN_BENCHMARK=1
-      
-    networks:
-      - investiq-network
-    restart: unless-stopped
-    runtime: nvidia
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-        reservations:
-          devices:
-            - driver: nvidia
-              device_ids: ['0']
-              capabilities: [gpu, compute, utility]
-    command: python /app/services/timeseries_server.py
 
   # CPU时序服务 (传统算法 + 轻量预测)
   cpu-timeseries:

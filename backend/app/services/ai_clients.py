@@ -57,40 +57,54 @@ class LLMServiceClient:
         Returns:
             推理结果
         """
+        # 使用 OpenAI Chat Completions 兼容端点: /v1/chat/completions
+        # 消息格式: [{"role":"user","content": prompt}]
+        # 兼容性：若响应不含 message.content，则回退到 text 字段。
         try:
             client = await self._get_client()
-            
-            # 构建请求
-            request_data = {
-                "prompt": prompt,
+
+            payload = {
+                "model": "auto",
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ],
                 "max_tokens": max_tokens,
                 "temperature": temperature,
-                "top_p": top_p
+                "top_p": top_p,
             }
-            
-            # 发送请求
-            response = await client.post("/v1/completions", json=request_data)
-            response.raise_for_status()
-            
+
+            # 简单重试
+            last_err = None
+            for attempt in range(self.config.retries):
+                try:
+                    response = await client.post("/v1/chat/completions", json=payload)
+                    response.raise_for_status()
+                    break
+                except Exception as e:
+                    last_err = e
+                    if attempt < self.config.retries - 1:
+                        await asyncio.sleep(self.config.retry_delay)
+                    else:
+                        raise
+
             result = response.json()
-            
-            # 提取文本结果
-            if "choices" in result and len(result["choices"]) > 0:
-                text = result["choices"][0].get("text", "")
-                return {
-                    "text": text.strip(),
-                    "tokens_used": result.get("usage", {}).get("total_tokens", 0),
-                    "model": "qwen3-8b-int8"
-                }
-            else:
-                return {"text": "", "tokens_used": 0, "model": "qwen3-8b-int8"}
-                
+            text = ""
+            if isinstance(result, dict) and result.get("choices"):
+                choice = result["choices"][0]
+                msg = choice.get("message") or {}
+                text = (msg.get("content") or choice.get("text") or "").strip()
+            return {
+                "text": text,
+                "tokens_used": result.get("usage", {}).get("total_tokens", 0),
+                "model": result.get("model", "llm")
+            }
+
         except Exception as e:
             logger.error(f"LLM service call failed: {e}")
             return {
                 "text": f"LLM服务调用失败: {str(e)}",
                 "tokens_used": 0,
-                "model": "qwen3-8b-int8",
+                "model": "llm",
                 "error": str(e)
             }
     
@@ -247,7 +261,7 @@ class TimeseriesServiceClient:
                 "confidence_lower": result.get("confidence_lower"),
                 "confidence_upper": result.get("confidence_upper"),
                 "processing_time": result.get("processing_time", 0.0),
-                "model": "patchtst-financial"
+                "model": "cpu-traditional"
             }
                 
         except Exception as e:
@@ -400,8 +414,9 @@ class AIServiceClients:
             base_url=os.getenv("SENTIMENT_SERVICE_URL", "http://sentiment-service:8002")
         ))
         
+        # 为兼容旧字段，TIMESERIES_SERVICE_URL 默认指向 CPU 服务
         self.timeseries_client = TimeseriesServiceClient(ServiceConfig(
-            base_url=os.getenv("TIMESERIES_SERVICE_URL", "http://timeseries-service:8003")
+            base_url=os.getenv("TIMESERIES_SERVICE_URL", os.getenv("CPU_TIMESERIES_SERVICE_URL", "http://cpu-timeseries:8004"))
         ))
         
         self.cpu_timeseries_client = CPUTimeseriesServiceClient(ServiceConfig(

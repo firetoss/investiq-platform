@@ -76,8 +76,8 @@ class AIService:
     
     通过HTTP调用独立的AI服务：
     1. 大语言模型推理 (GPU专用服务)
-    2. 情感分析 (DLA0专用服务)
-    3. 时间序列预测 (DLA1专用服务)
+    2. 情感分析 (GPU专用服务)
+    3. 时间序列预测 (CPU专用服务)
     4. CPU传统算法 (CPU专用服务)
     """
     
@@ -261,9 +261,9 @@ class AIService:
                 processing_time=processing_time
             )
     
-    async def timeseries_forecast(self, request: TimeseriesRequest, model_name: str = "patchtst-financial") -> TimeseriesResponse:
+    async def timeseries_forecast(self, request: TimeseriesRequest, model_name: str = "cpu-traditional") -> TimeseriesResponse:
         """
-        时间序列预测 - 通过HTTP调用DLA1专用时序预测服务
+        时间序列预测 - 通过HTTP调用CPU专用时序预测服务
         
         Args:
             request: 时间序列预测请求
@@ -275,8 +275,8 @@ class AIService:
         start_time = datetime.now()
         
         try:
-            # 调用独立的时序预测服务
-            result = await self.ai_clients.timeseries_client.predict(
+            # 调用CPU时序预测服务
+            result = await self.ai_clients.cpu_timeseries_client.predict(
                 data=request.data,
                 horizon=request.horizon,
                 confidence_intervals=request.confidence_intervals
@@ -289,7 +289,7 @@ class AIService:
                 model_name=result.get("model", model_name),
                 inference_time=processing_time,
                 batch_size=1,
-                hardware_target="dla"  # 时序预测使用DLA1
+                hardware_target="cpu"
             )
             
             return TimeseriesResponse(

@@ -2,33 +2,30 @@
 
 > 基于NVIDIA Jetson Orin AGX的智能投资决策平台
 > 
-> 采用GPU+2DLA+CPU四重并行计算架构，提供中文金融AI分析服务
+> 采用GPU+CPU并行计算架构，提供中文金融AI分析服务
 
 ## 🎯 项目概述
 
 InvestIQ Platform是一个专门针对中文金融市场的智能投资决策平台，基于"政策→行业→个股"的四闸门投资方法论，提供AI增强的投资分析服务。
 
 ### 核心特性
-- 🤖 **AI驱动分析**: Qwen3-8B + RoBERTa + PatchTST模型组合
-- 🚀 **Jetson优化**: 充分利用GPU+2DLA+CPU硬件资源
+- 🤖 **AI驱动分析**: Qwen3-8B + RoBERTa + ARIMA/GARCH 基线
+- 🚀 **Jetson优化**: 充分利用GPU+CPU硬件资源
 - 📊 **实时分析**: 政策分析、情感分析、趋势预测
 - 🔄 **微服务架构**: 基于dustynv优化镜像的容器化部署
 - 📈 **性能监控**: 全方位的硬件和服务性能监控
 
 ## 🏗️ 技术架构
 
-### 硬件架构
+### 硬件架构（简化）
 ```
-┌─────────────────────────────────────────────────────────┐
-│      Jetson Orin AGX 极致硬件利用架构                    │
-├─────────────────┬─────────────────┬─────────────────────┤
-│      GPU        │    DLA 0&1      │      CPU           │
-│                 │                 │                     │
-│   Qwen3-8B      │ RoBERTa(DLA0)   │ 传统金融算法        │
-│   INT8量化      │ PatchTST(DLA1)  │ ARIMA/GARCH        │
-│   35层加速      │ FP16精度        │ 技术指标计算        │
-│   12GB内存      │ 1.7GB内存       │ 并行处理           │
-└─────────────────┴─────────────────┴─────────────────────┘
+┌───────────────────────────────────────────────┐
+│           Jetson Orin AGX 资源分配            │
+├─────────────────────┬─────────────────────────┤
+│        GPU          │          CPU            │
+│ • LLM (Qwen3-8B)    │ • ARIMA/GARCH/指标      │
+│ • 情感分析 (BERT)    │ • 数据处理/服务逻辑      │
+└─────────────────────┴─────────────────────────┘
 ```
 
 ### 微服务架构
@@ -40,8 +37,8 @@ InvestIQ Platform是一个专门针对中文金融市场的智能投资决策平
 │                 │                 │                     │
 │ • API网关       │ • LLM(dustynv)  │ • PostgreSQL       │
 │ • 业务逻辑      │ • 情感(dustynv) │ • Redis            │
-│ • 数据库操作    │ • 时序(dustynv) │ • MinIO            │
-│ • HTTP代理      │ • CPU时序       │ • 监控服务         │
+│ • 数据库操作    │ • CPU时序       │ • MinIO            │
+│ • HTTP代理      │                  │ • 监控服务         │
 └─────────────────┴─────────────────┴─────────────────────┘
 ```
 
@@ -89,9 +86,14 @@ curl http://localhost:8000/health
 
 # 检查AI服务
 curl http://localhost:8001/health  # LLM服务 (GPU)
-curl http://localhost:8002/health  # 情感分析 (DLA0)
-curl http://localhost:8003/health  # 时序预测 (DLA1)
-curl http://localhost:8004/health  # CPU时序算法
+curl http://localhost:8002/health  # 情感分析 (GPU)
+curl http://localhost:8004/health  # 时序预测 (CPU ARIMA/GARCH)
+
+# 监控面板（可选）
+# Prometheus 界面
+http://localhost:9090
+# Grafana 界面（默认账号：admin / 密码：investiq123）
+http://localhost:3000
 
 # 查看性能监控
 curl http://localhost:8000/api/v1/performance/dashboard
@@ -99,18 +101,14 @@ curl http://localhost:8000/api/v1/performance/dashboard
 
 ## 📊 性能指标
 
-### AI推理性能
-- **LLM推理**: 120-180 tokens/s (Qwen3-8B INT8, GPU专用)
-- **情感分析**: 3000+ samples/s (RoBERTa中文金融版, DLA0专用)
-- **时序预测**: 800+ sequences/s (PatchTST金融版, DLA1专用)
-- **CPU算法**: 1000+ sequences/s (ARIMA/GARCH, CPU并行)
+### AI推理性能（示意）
+- **LLM推理**: 120-180 tokens/s（Qwen3-8B INT8, GPU）
+- **情感分析**: 子秒级延迟（小批量，GPU）
+- **时序预测**: 取决于标的与网格，CPU 并行可达数百序列/分钟
 
 ### 硬件利用率
-- **GPU利用率**: 85-95% (专注LLM推理)
-- **DLA0利用率**: 80-90% (情感分析专用)
-- **DLA1利用率**: 75-85% (时序预测专用)
-- **CPU利用率**: 60-80% (传统算法+系统服务)
-- **总体利用率**: 90%+ (接近硬件极限)
+- **GPU**: 主要用于 LLM 与情感，按并发动态波动
+- **CPU**: 时序与系统服务；建议按负载调整线程配额
 
 ### 精度表现
 - **LLM精度**: 相比4-bit量化提升5-7%
@@ -153,8 +151,8 @@ uv run isort backend/
 | **主应用** | 8000 | API网关、业务逻辑 | 共享访问 |
 | **LLM服务** | 8001 | Qwen3-8B推理 | GPU专用 |
 | **情感分析** | 8002 | RoBERTa情感分析 | DLA0专用 |
-| **时序预测** | 8003 | PatchTST预测 | DLA1专用 |
 | **CPU时序** | 8004 | 传统算法 | CPU专用 |
+| **情感分析** | 8002 | 文本情感 | GPU专用 |
 
 ## 📚 API文档
 
@@ -208,14 +206,13 @@ response = httpx.post("http://localhost:8000/api/v1/ai/timeseries/forecast",
 - **框架**: FastAPI + uvicorn
 - **数据库**: PostgreSQL 15 + Redis 7
 - **AI框架**: PyTorch 2.1 + Transformers
-- **硬件加速**: CUDA + DLA + TensorRT
+- **硬件加速**: CUDA（可选 TensorRT/ONNXRuntime-TensorRT）
 - **容器**: Docker + dustynv镜像
 
 ### AI模型
-- **LLM**: Qwen3-8B INT8量化 (中文金融专用)
-- **情感分析**: RoBERTa中文金融版 (DLA优化)
-- **时序预测**: PatchTST金融版 (DLA优化)
-- **传统算法**: ARIMA/GARCH/技术指标 (CPU并行)
+- **LLM**: Qwen3-8B INT8 量化（GPU）
+- **情感分析**: 中文 BERT/RoBERTa（GPU）
+- **时序预测**: ARIMA/GARCH/技术指标（CPU 并行）
 
 ### 部署技术
 - **容器编排**: Docker Compose
@@ -226,10 +223,9 @@ response = httpx.post("http://localhost:8000/api/v1/ai/timeseries/forecast",
 ## 📈 性能优化
 
 ### Jetson优化特性
-- **异构计算**: GPU+2DLA+CPU四重并行
-- **精度平衡**: INT8+FP16混合精度
-- **内存优化**: 动态模型加载和卸载
-- **批处理**: DLA专用批处理优化
+- **异构计算**: GPU+CPU 并行
+- **精度平衡**: INT8（LLM）+ FP16（情感）
+- **内存优化**: 按需加载与批处理
 
 ### 部署优化
 - **预优化镜像**: 基于dustynv官方镜像

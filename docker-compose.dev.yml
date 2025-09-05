@@ -37,10 +37,10 @@ services:
       - DATABASE_URL=postgresql://investiq:dev123@postgres-dev:5432/investiq_dev
       - REDIS_URL=redis://redis-dev:6379/0
       
-      # AI服务URL (开发环境可以使用mock或本地服务)
+      # AI服务URL (开发环境可以使用本地服务)
       - LLM_SERVICE_URL=http://localhost:8001
       - SENTIMENT_SERVICE_URL=http://localhost:8002
-      - TIMESERIES_SERVICE_URL=http://localhost:8003
+      - TIMESERIES_SERVICE_URL=http://localhost:8004
       - CPU_TIMESERIES_SERVICE_URL=http://localhost:8004
       
       # 开发工具配置

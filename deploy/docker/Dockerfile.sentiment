@@ -1,0 +1,24 @@
+# InvestIQ Sentiment Service - GPU image
+FROM dustynv/pytorch:2.1-r36.4.4
+
+WORKDIR /app
+
+# Optional: accelerate downloads; silence cache warnings
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+# Install required Python deps for sentiment service
+RUN pip install --no-cache-dir \
+    transformers==4.36.0 \
+    tokenizers==0.15.0
+
+# Create directories
+RUN mkdir -p /app/services /app/logs
+
+# Copy service code (still allow bind-mount override in compose)
+COPY backend/app/services /app/services
+
+EXPOSE 8000
+
+CMD ["python", "/app/services/sentiment_server.py"]
+

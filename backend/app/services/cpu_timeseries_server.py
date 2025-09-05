@@ -1,6 +1,7 @@
 """
 CPU时序服务器 - 传统金融算法专用
-基于CPU并行计算，提供ARIMA、GARCH、技术指标等传统算法
+基于CPU并行计算，提供真实的 ARIMA（statsmodels）与 GARCH（arch）预测，
+并包含移动平均、指数平均与技术指标等基线方法。
 """
 
 import os
@@ -16,13 +17,24 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-# 条件导入科学计算库
+# 条件导入库
 try:
-    from scipy import stats
-    from sklearn.preprocessing import StandardScaler
+    from scipy import stats  # 可用于后续扩展
     SCIPY_AVAILABLE = True
 except ImportError:
     SCIPY_AVAILABLE = False
+
+try:
+    from statsmodels.tsa.statespace.sarimax import SARIMAX
+    STATS_MODELS_AVAILABLE = True
+except ImportError:
+    STATS_MODELS_AVAILABLE = False
+
+try:
+    from arch import arch_model
+    ARCH_AVAILABLE = True
+except ImportError:
+    ARCH_AVAILABLE = False
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -31,8 +43,9 @@ logger = logging.getLogger(__name__)
 # 创建FastAPI应用
 app = FastAPI(title="InvestIQ CPU Timeseries Service", version="1.0.0")
 
-# 线程池执行器
-executor = ThreadPoolExecutor(max_workers=12)
+# 线程池执行器（按环境/CPU自动配置）
+_default_workers = os.getenv("OMP_NUM_THREADS") or str(os.cpu_count() or 4)
+executor = ThreadPoolExecutor(max_workers=int(_default_workers))
 
 
 class CPUTimeseriesRequest(BaseModel):
@@ -138,6 +151,135 @@ class TraditionalTimeseriesAlgorithms:
             last_diff = next_diff
         
         return predictions
+
+    @staticmethod
+    def arima_statsmodels(
+        data: List[float],
+        horizon: int = 10,
+        order: Optional[tuple] = None,
+        max_p: int = 2,
+        max_d: int = 2,
+        max_q: int = 2,
+    ) -> Dict[str, Any]:
+        """使用 statsmodels 的 SARIMAX 进行 ARIMA 预测，带可选网格搜索。
+
+        返回: { predictions, conf_int_lower, conf_int_upper, order }
+        """
+        if not STATS_MODELS_AVAILABLE or len(data) < 3:
+            preds = TraditionalTimeseriesAlgorithms.exponential_moving_average(data, 0.3, horizon)
+            return {"predictions": preds, "conf_int_lower": None, "conf_int_upper": None, "order": None}
+
+        y = np.asarray(data, dtype=float)
+
+        best_order = order
+        best_aic = np.inf
+        if order is None:
+            # 轻量网格搜索，控制计算量
+            for p in range(0, max_p + 1):
+                for d in range(0, max_d + 1):
+                    for q in range(0, max_q + 1):
+                        if (p, d, q) == (0, 0, 0):
+                            continue
+                        try:
+                            model = SARIMAX(
+                                y,
+                                order=(p, d, q),
+                                enforce_stationarity=False,
+                                enforce_invertibility=False,
+                            )
+                            res = model.fit(disp=False)
+                            if res.aic < best_aic:
+                                best_aic = res.aic
+                                best_order = (p, d, q)
+                        except Exception:
+                            continue
+
+        try:
+            model = SARIMAX(
+                y,
+                order=best_order if best_order else (1, 1, 0),
+                enforce_stationarity=False,
+                enforce_invertibility=False,
+            )
+            res = model.fit(disp=False)
+            fc = res.get_forecast(steps=horizon)
+            preds = fc.predicted_mean.astype(float).tolist()
+            ci = fc.conf_int(alpha=0.05)  # 95%
+            lower = ci.iloc[:, 0].astype(float).tolist() if hasattr(ci, "iloc") else None
+            upper = ci.iloc[:, 1].astype(float).tolist() if hasattr(ci, "iloc") else None
+
+            return {
+                "predictions": preds,
+                "conf_int_lower": lower,
+                "conf_int_upper": upper,
+                "order": best_order,
+            }
+        except Exception:
+            preds = TraditionalTimeseriesAlgorithms.moving_average(data, 5, horizon)
+            return {"predictions": preds, "conf_int_lower": None, "conf_int_upper": None, "order": best_order}
+
+    @staticmethod
+    def garch_arch(
+        data: List[float],
+        horizon: int = 10,
+        p: int = 1,
+        q: int = 1,
+    ) -> Dict[str, Any]:
+        """使用 arch 包对收益率做 GARCH(1,1) 波动率建模，并给出价格预测与区间。
+
+        简化假设: 未来均值回报取历史均值，置信区间基于条件方差。
+
+        返回: { predictions, conf_int_lower, conf_int_upper, params }
+        """
+        if not ARCH_AVAILABLE or len(data) < 3:
+            preds = TraditionalTimeseriesAlgorithms.exponential_moving_average(data, 0.3, horizon)
+            return {"predictions": preds, "conf_int_lower": None, "conf_int_upper": None, "params": None}
+
+        prices = np.asarray(data, dtype=float)
+        last_price = prices[-1]
+        rets = np.diff(prices) / prices[:-1]
+        if np.any(~np.isfinite(rets)) or rets.size < 5:
+            preds = TraditionalTimeseriesAlgorithms.moving_average(data, 5, horizon)
+            return {"predictions": preds, "conf_int_lower": None, "conf_int_upper": None, "params": None}
+
+        # arch 接受百分数收益
+        rets_pct = rets * 100.0
+        try:
+            am = arch_model(rets_pct, mean="Constant", vol="GARCH", p=p, q=q, dist="normal")
+            res = am.fit(disp="off")
+            # 预测未来条件方差（百分数平方）
+            fc = res.forecast(horizon=horizon)
+            var_pct2 = fc.variance.values[-1, :]
+            # 将方差转换为标准差（小数）
+            sigma = np.sqrt(np.maximum(var_pct2, 0.0)) / 100.0
+
+            # 简化均值回报: 历史均值
+            mu = float(np.nanmean(rets)) if np.isfinite(np.nanmean(rets)) else 0.0
+
+            preds = []
+            lower = []
+            upper = []
+            price = last_price
+            z = 1.96  # 95%
+            for i in range(horizon):
+                # 期望价格按均值回报复利
+                price = price * (1.0 + mu)
+                preds.append(float(price))
+                # 区间用 sigma 线性近似（小波动场景近似成立）
+                lo = price * (1.0 - z * sigma[i])
+                hi = price * (1.0 + z * sigma[i])
+                lower.append(float(lo))
+                upper.append(float(hi))
+
+            return {
+                "predictions": preds,
+                "conf_int_lower": lower,
+                "conf_int_upper": upper,
+                "params": {"mu": mu, "p": p, "q": q},
+            }
+        except Exception:
+            preds = TraditionalTimeseriesAlgorithms.exponential_moving_average(data, 0.3, horizon)
+            return {"predictions": preds, "conf_int_lower": None, "conf_int_upper": None, "params": None}
     
     @staticmethod
     def technical_indicators(data: List[float], horizon: int = 10) -> Dict[str, Any]:
@@ -245,11 +387,23 @@ async def predict_timeseries(request: CPUTimeseriesRequest) -> CPUTimeseriesResp
                 request.data, 0.3, request.horizon
             )
         elif algorithm_used == "arima":
-            predictions = await loop.run_in_executor(
+            result = await loop.run_in_executor(
                 executor,
-                TraditionalTimeseriesAlgorithms.simple_arima,
+                TraditionalTimeseriesAlgorithms.arima_statsmodels,
                 request.data, request.horizon
             )
+            predictions = result["predictions"]
+            arima_lower = result.get("conf_int_lower")
+            arima_upper = result.get("conf_int_upper")
+        elif algorithm_used == "garch":
+            result = await loop.run_in_executor(
+                executor,
+                TraditionalTimeseriesAlgorithms.garch_arch,
+                request.data, request.horizon
+            )
+            predictions = result["predictions"]
+            garch_lower = result.get("conf_int_lower")
+            garch_upper = result.get("conf_int_upper")
         else:
             # 默认使用移动平均
             predictions = await loop.run_in_executor(
@@ -263,9 +417,17 @@ async def predict_timeseries(request: CPUTimeseriesRequest) -> CPUTimeseriesResp
         confidence_upper = None
         
         if request.confidence_intervals:
-            std_dev = np.std(request.data[-min(20, len(request.data)):])
-            confidence_lower = [p - 1.96 * std_dev for p in predictions]
-            confidence_upper = [p + 1.96 * std_dev for p in predictions]
+            # 若算法自身返回区间则直接使用，否则用简单近似
+            if algorithm_used == "arima" and 'arima_lower' in locals():
+                confidence_lower = arima_lower
+                confidence_upper = arima_upper
+            elif algorithm_used == "garch" and 'garch_lower' in locals():
+                confidence_lower = garch_lower
+                confidence_upper = garch_upper
+            else:
+                std_dev = np.std(request.data[-min(20, len(request.data)):])
+                confidence_lower = [p - 1.96 * std_dev for p in predictions]
+                confidence_upper = [p + 1.96 * std_dev for p in predictions]
         
         processing_time = (datetime.now() - start_time).total_seconds()
         
@@ -329,14 +491,16 @@ async def health_check():
         # 检查CPU资源
         cpu_cores = int(os.getenv("OMP_NUM_THREADS", "12"))
         
-        return {
-            "status": "healthy",
-            "cpu_cores": cpu_cores,
-            "algorithms_available": ["ma", "ema", "arima", "technical"],
-            "vectorization_enabled": os.getenv("ENABLE_VECTORIZATION", "true") == "true",
-            "scipy_available": SCIPY_AVAILABLE,
-            "timestamp": datetime.now().isoformat()
-        }
+    return {
+        "status": "healthy",
+        "cpu_cores": cpu_cores,
+        "algorithms_available": ["ma", "ema", "arima", "garch", "technical"],
+        "vectorization_enabled": os.getenv("ENABLE_VECTORIZATION", "true") == "true",
+        "scipy_available": SCIPY_AVAILABLE,
+        "statsmodels_available": STATS_MODELS_AVAILABLE,
+        "arch_available": ARCH_AVAILABLE,
+        "timestamp": datetime.now().isoformat()
+    }
         
     except Exception as e:
         logger.error(f"Health check failed: {e}")
@@ -358,7 +522,7 @@ async def get_metrics():
             "memory_percent": psutil.virtual_memory().percent,
             "cpu_cores": psutil.cpu_count(),
             "threads_configured": int(os.getenv("OMP_NUM_THREADS", "12")),
-            "algorithms": ["ma", "ema", "arima", "technical"],
+            "algorithms": ["ma", "ema", "arima", "garch", "technical"],
             "hardware_target": "CPU"
         }
         

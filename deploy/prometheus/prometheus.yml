@@ -1,0 +1,8 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: investiq-app
+    static_configs:
+      - targets: ['investiq-app:8000']
+
