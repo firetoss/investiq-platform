@@ -60,26 +60,26 @@ format:
 
 # 构建Docker镜像
 docker-build:
-	@echo "构建Docker镜像..."
-	docker-compose build
+    @echo "构建Docker镜像..."
+    docker-compose -f docker-compose.dev.yml build
 
 # 启动Docker服务
 docker-up:
-	@echo "启动Docker服务..."
-	docker-compose up -d
-	@echo "等待服务启动..."
-	sleep 10
-	@echo "服务状态:"
-	docker-compose ps
+    @echo "启动Docker服务..."
+    docker-compose -f docker-compose.dev.yml up -d
+    @echo "等待服务启动..."
+    sleep 10
+    @echo "服务状态:"
+    docker-compose -f docker-compose.dev.yml ps
 
 # 停止Docker服务
 docker-down:
-	@echo "停止Docker服务..."
-	docker-compose down
+    @echo "停止Docker服务..."
+    docker-compose -f docker-compose.dev.yml down
 
 # 查看服务日志
 logs:
-	docker-compose logs -f
+    docker-compose -f docker-compose.dev.yml logs -f
 
 # 初始化数据库
 db-init:

@@ -37,7 +37,7 @@ ENV TORCH_CUDNN_V8_API_ENABLED=1
 ENV TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1
 
 # 安装项目依赖
-COPY pyproject.toml uv.lock* ./
+COPY pyproject.toml ./
 
 # 安装uv包管理器 (如果镜像中没有)
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh || echo "uv already installed"

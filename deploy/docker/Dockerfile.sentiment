@@ -1,24 +1,26 @@
-# InvestIQ Sentiment Service - GPU image
 FROM dustynv/pytorch:2.1-r36.4.4
 
 WORKDIR /app
 
-# Optional: accelerate downloads; silence cache warnings
-ENV PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
 
-# Install required Python deps for sentiment service
-RUN pip install --no-cache-dir \
-    transformers==4.36.0 \
-    tokenizers==0.15.0
+# 安装 uv 包管理器（若镜像已内置则跳过）
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh || echo "uv already installed"
+ENV PATH="/root/.cargo/bin:$PATH"
 
-# Create directories
-RUN mkdir -p /app/services /app/logs
+# 仅复制依赖声明，避免因缺少锁文件导致构建失败
+COPY pyproject.toml ./
 
-# Copy service code (still allow bind-mount override in compose)
-COPY backend/app/services /app/services
+# 安装所需依赖（包含 GPU 相关）
+RUN uv sync --extra gpu --no-dev
+
+# 复制服务代码
+RUN mkdir -p /app/services
+COPY backend/app/services/sentiment_server.py /app/services/sentiment_server.py
 
 EXPOSE 8000
 
-CMD ["python", "/app/services/sentiment_server.py"]
+CMD ["uv", "run", "python", "/app/services/sentiment_server.py"]
 
