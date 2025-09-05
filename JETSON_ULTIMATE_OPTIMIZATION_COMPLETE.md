@@ -82,7 +82,7 @@ main-app:           自定义镜像基于dustynv/pytorch
 | 硬件单元 | 利用率 | 专用任务 | 内存占用 |
 |----------|--------|----------|----------|
 | **GPU** | 85-95% | Qwen3-8B LLM | 12GB |
-| **DLA核心0** | 80-90% | RoBERTa情感分析 | 1.2GB |
+| **DLA核心0** | 80-90% | RoBERTa英文金融情感分析 | 1.2GB |
 | **DLA核心1** | 75-85% | PatchTST时序预测 | 0.5GB |
 | **CPU** | 60-80% | 传统算法+系统服务 | 2GB |
 | **总计** | 90%+ | 四重并行 | 15.7GB |
@@ -224,7 +224,7 @@ Auto_Scaling: 支持独立扩缩容
    ```bash
    # 下载优化模型
    wget https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-INT8.gguf
-   wget https://huggingface.co/Jean-Baptiste/roberta-large-financial-news-sentiment-en
+   wget https://huggingface.co/IDEA-CCNL/Erlangshen-Roberta-330M-Sentiment
    wget https://huggingface.co/ibm-granite/granite-timeseries-patchtst
    ```
 

@@ -183,7 +183,7 @@ class AIService:
                 processing_time=processing_time
             )
     
-    async def sentiment_analysis(self, request: SentimentRequest, model_name: str = "roberta-financial-en") -> SentimentResponse:
+    async def sentiment_analysis(self, request: SentimentRequest, model_name: str = "roberta-chinese-financial") -> SentimentResponse:
         """
         情感分析 - 通过HTTP调用DLA0专用情感分析服务
         

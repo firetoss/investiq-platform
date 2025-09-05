@@ -132,7 +132,7 @@ services:
       - TORCH_DTYPE=float16
       - BATCH_SIZE=32
       - MAX_LENGTH=512
-      - MODEL_NAME=Jean-Baptiste/roberta-large-financial-news-sentiment-en
+      - MODEL_NAME=IDEA-CCNL/Erlangshen-Roberta-330M-Sentiment
       - MODEL_TYPE=sentiment
       
       # 性能优化

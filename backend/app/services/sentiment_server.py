@@ -1,6 +1,6 @@
 """
 情感分析服务器 - DLA核心0专用
-基于RoBERTa英文金融模型，优化批处理性能
+基于RoBERTa中文金融模型，优化批处理性能
 """
 
 import os
@@ -56,11 +56,11 @@ class SentimentResponse(BaseModel):
 
 
 async def load_model():
-    """加载RoBERTa英文金融情感分析模型"""
+    """加载RoBERTa中文金融情感分析模型"""
     global sentiment_model, tokenizer
     
     try:
-        model_name = os.getenv("MODEL_NAME", "Jean-Baptiste/roberta-large-financial-news-sentiment-en")
+        model_name = os.getenv("MODEL_NAME", "IDEA-CCNL/Erlangshen-Roberta-330M-Sentiment")
         dla_core = int(os.getenv("DLA_CORE", "0"))
         batch_size = int(os.getenv("BATCH_SIZE", "32"))
         
@@ -182,7 +182,7 @@ async def analyze_sentiment(request: SentimentRequest) -> SentimentResponse:
             processing_time=processing_time,
             batch_size=len(request.texts),
             model_info={
-                "model_name": os.getenv("MODEL_NAME", "Jean-Baptiste/roberta-large-financial-news-sentiment-en"),
+                "model_name": os.getenv("MODEL_NAME", "IDEA-CCNL/Erlangshen-Roberta-330M-Sentiment"),
                 "device": "DLA_CORE_0",
                 "precision": "FP16",
                 "batch_size": int(os.getenv("BATCH_SIZE", "32"))
@@ -266,7 +266,7 @@ if __name__ == "__main__":
     logger.info(f"Starting sentiment analysis service on {host}:{port}")
     logger.info(f"DLA Core: {os.getenv('DLA_CORE', '0')}")
     logger.info(f"Batch Size: {os.getenv('BATCH_SIZE', '32')}")
-    logger.info(f"Model: {os.getenv('MODEL_NAME', 'Jean-Baptiste/roberta-large-financial-news-sentiment-en')}")
+    logger.info(f"Model: {os.getenv('MODEL_NAME', 'IDEA-CCNL/Erlangshen-Roberta-330M-Sentiment')}")
     
     # 启动服务
     uvicorn.run(

@@ -236,11 +236,11 @@ class ModelManager:
                     "use_mmap": True,   # 内存映射，减少内存占用
                 }
             ),
-            # 情感分析: RoBERTa英文金融版 FP16 + DLA0 (~1.2GB) - 精度优先
+            # 情感分析: RoBERTa中文金融版 FP16 + DLA0 (~1.2GB) - 精度优先
             ModelConfig(
-                name="roberta-financial-en",
+                name="roberta-chinese-financial",
                 model_type=ModelType.SENTIMENT,
-                model_path="Jean-Baptiste/roberta-large-financial-news-sentiment-en",
+                model_path="IDEA-CCNL/Erlangshen-Roberta-330M-Sentiment",
                 precision=ModelPrecision.FP16,
                 hardware_target=HardwareTarget.DLA,
                 memory_estimate=1200,  # 1.2GB，精度优先
