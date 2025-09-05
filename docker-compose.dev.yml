@@ -53,12 +53,12 @@ services:
     networks:
       - investiq-dev-network
     restart: unless-stopped
-    # 开发环境不需要GPU，可以在普通机器上开发
-    # runtime: nvidia  # 注释掉，开发时可选
+    # Jetson 开发机可启用GPU支持
+    runtime: nvidia
 
   # 开发数据库 (轻量配置)
   postgres-dev:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     container_name: investiq-postgres-dev
     environment:
       - POSTGRES_DB=investiq_dev

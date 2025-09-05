@@ -187,7 +187,7 @@ services:
 
   # PostgreSQL数据库
   postgres:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     container_name: investiq-postgres
     environment:
       - POSTGRES_DB=investiq

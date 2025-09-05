@@ -204,7 +204,7 @@ response = httpx.post("http://localhost:8000/api/v1/ai/timeseries/forecast",
 
 ### 后端技术
 - **框架**: FastAPI + uvicorn
-- **数据库**: PostgreSQL 15 + Redis 7
+- **数据库**: PostgreSQL 16 + Redis 7
 - **AI框架**: PyTorch 2.1 + Transformers
 - **硬件加速**: CUDA（可选 TensorRT/ONNXRuntime-TensorRT）
 - **容器**: Docker + dustynv镜像

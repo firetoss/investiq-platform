@@ -28,8 +28,8 @@ dependencies = [
     # 数据库相关
     "sqlalchemy>=2.0.23",
     "alembic>=1.13.1",
-    "asyncpg>=0.29.0",
-    "psycopg2-binary>=2.9.9",
+    "asyncpg>=0.30.0",
+    "psycopg2-binary>=2.9.10",
     
     # Redis 缓存
     "redis>=5.0.1",
