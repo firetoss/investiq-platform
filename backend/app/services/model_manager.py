@@ -236,9 +236,9 @@ class ModelManager:
                     "use_mmap": True,   # 内存映射，减少内存占用
                 }
             ),
-            # 情感分析: RoBERTa中文金融版 FP16 + DLA0 (~1.2GB) - 精度优先
+            # 情感分析: RoBERTa英文金融版 FP16 + DLA0 (~1.2GB) - 精度优先
             ModelConfig(
-                name="roberta-chinese-financial",
+                name="roberta-financial-en",
                 model_type=ModelType.SENTIMENT,
                 model_path="Jean-Baptiste/roberta-large-financial-news-sentiment-en",
                 precision=ModelPrecision.FP16,
@@ -305,7 +305,9 @@ class ModelManager:
         with self._lock:
             try:
                 # 检查内存使用
-                if not self._check_memory_available():
+                # 使用配置中的预估内存进行更精确的判定
+                required_mb = self.configs[model_name].memory_estimate if model_name in self.configs else 0
+                if not self._check_memory_available(required_mb=required_mb):
                     logger.warning("Memory limit reached, unloading least used models")
                     await self._unload_least_used_models()
                 
@@ -454,11 +456,7 @@ class ModelManager:
         if model_name:
             return self.status.get(model_name)
         return self.status.copy()
-    
-    def _check_memory_available(self) -> bool:
-        """检查内存是否可用"""
-        # 简化的内存检查
-        return len(self.models) < 3  # 最多同时加载3个模型
+
     
     async def _unload_least_used_models(self):
         """卸载最少使用的模型"""
