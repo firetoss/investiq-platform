@@ -62,8 +62,8 @@ class EvidenceItem(Base):
     file_size = Column(Integer, comment="文件大小 (字节)")
     file_type = Column(String(50), comment="文件类型")
     
-    # 元数据
-    metadata = Column(JSON, comment="元数据")
+    # 元数据和标签
+    extra_data = Column(JSON, comment="扩展数据")
     tags = Column(JSON, comment="标签列表")
     keywords = Column(JSON, comment="关键词列表")
     

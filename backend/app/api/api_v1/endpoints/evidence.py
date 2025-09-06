@@ -41,7 +41,7 @@ class EvidenceAttachRequest(BaseModel):
     published_at: Optional[datetime] = Field(None, description="发布时间")
     tags: Optional[List[str]] = Field(None, description="标签列表")
     keywords: Optional[List[str]] = Field(None, description="关键词列表")
-    metadata: Optional[Dict[str, Any]] = Field(None, description="元数据")
+    extra_data: Optional[Dict[str, Any]] = Field(None, description="扩展数据")
 
     @validator("entity_type")
     def validate_entity_type(cls, v):
@@ -125,7 +125,7 @@ async def attach_evidence(
             published_at=request.published_at,
             tags=request.tags,
             keywords=request.keywords,
-            metadata=request.metadata,
+            extra_data=request.extra_data,
             db=db
         )
         

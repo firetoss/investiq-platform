@@ -14,29 +14,36 @@ from sqlalchemy.engine import Engine
 from backend.app.core.config import settings
 
 # 创建基础模型类
-Base = declarative_base()
-
-# 数据库元数据配置
-metadata = MetaData(
-    naming_convention={
-        "ix": "ix_%(column_0_label)s",
-        "uq": "uq_%(table_name)s_%(column_0_name)s",
-        "ck": "ck_%(table_name)s_%(constraint_name)s",
-        "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
-        "pk": "pk_%(table_name)s"
-    }
+Base = declarative_base(
+    metadata=MetaData(
+        naming_convention={
+            "ix": "ix_%(column_0_label)s",
+            "uq": "uq_%(table_name)s_%(column_0_name)s",
+            "ck": "ck_%(table_name)s_%(constraint_name)s",
+            "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+            "pk": "pk_%(table_name)s"
+        }
+    )
 )
 
 # 创建异步数据库引擎
-engine = create_async_engine(
-    settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"),
-    echo=settings.DEBUG,
-    pool_size=settings.DATABASE_POOL_SIZE,
-    max_overflow=settings.DATABASE_MAX_OVERFLOW,
-    pool_pre_ping=True,
-    pool_recycle=3600,  # 1小时回收连接
-    poolclass=QueuePool if settings.ENVIRONMENT == "production" else NullPool,
-)
+if settings.ENVIRONMENT == "production":
+    engine = create_async_engine(
+        settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"),
+        echo=settings.DEBUG,
+        pool_size=settings.DATABASE_POOL_SIZE,
+        max_overflow=settings.DATABASE_MAX_OVERFLOW,
+        pool_pre_ping=True,
+        pool_recycle=3600,  # 1小时回收连接
+        poolclass=QueuePool,
+    )
+else:
+    engine = create_async_engine(
+        settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"),
+        echo=settings.DEBUG,
+        pool_pre_ping=True,
+        poolclass=NullPool,
+    )
 
 # 创建会话工厂
 AsyncSessionLocal = async_sessionmaker(

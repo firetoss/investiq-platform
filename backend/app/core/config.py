@@ -5,7 +5,8 @@ InvestIQ Platform - 核心配置模块
 
 import os
 from typing import List, Optional, Union
-from pydantic import BaseSettings, validator, Field
+from pydantic import validator, Field
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
