@@ -61,9 +61,11 @@ class Settings(BaseSettings):
     )
     
     # LLM配置
-    LLM_MODEL_NAME: str = Field(default="llama2-7b-chat", env="LLM_MODEL_NAME")
+    LLM_MODEL_NAME: str = Field(default="Qwen3-8B-INT8", env="LLM_MODEL_NAME")
+    LLM_MODEL_PATH: str = Field(default="/models/Qwen3-8B-INT8.gguf", env="LLM_MODEL_PATH")
     LLM_MAX_TOKENS: int = Field(default=2048, env="LLM_MAX_TOKENS")
-    LLM_TEMPERATURE: float = Field(default=0.3, env="LLM_TEMPERATURE")
+    LLM_TEMPERATURE: float = Field(default=0.7, env="LLM_TEMPERATURE")
+    LLM_TOP_P: float = Field(default=0.9, env="LLM_TOP_P")
     ENABLE_LOCAL_LLM: bool = Field(default=True, env="ENABLE_LOCAL_LLM")
     
     # 金融数据源配置

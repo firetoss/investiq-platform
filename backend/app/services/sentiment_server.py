@@ -193,8 +193,8 @@ async def analyze_sentiment(request: SentimentRequest) -> SentimentResponse:
             batch_size=len(request.texts),
             model_info={
                 "model_name": os.getenv("MODEL_NAME", "IDEA-CCNL/Erlangshen-Roberta-330M-Sentiment"),
-                "device": "DLA_CORE_0",
-                "precision": "FP16",
+                "device": "GPU" if torch.cuda.is_available() else "CPU",
+                "precision": "FP16" if torch.cuda.is_available() else "FP32",
                 "batch_size": int(os.getenv("BATCH_SIZE", "32"))
             }
         )
@@ -210,9 +210,9 @@ async def health_check():
     try:
         model_loaded = sentiment_model is not None
         
-        # 检查DLA状态
-        dla_available = torch.cuda.is_available()
-        dla_core = int(os.getenv("DLA_CORE", "0"))
+        # 检查GPU状态
+        gpu_available = torch.cuda.is_available()
+        gpu_device = 0 if gpu_available else -1
         
         # 内存使用检查
         if torch.cuda.is_available():
@@ -225,8 +225,8 @@ async def health_check():
         return {
             "status": "healthy" if model_loaded else "degraded",
             "model_loaded": model_loaded,
-            "dla_available": dla_available,
-            "dla_core": dla_core,
+            "gpu_available": gpu_available,
+            "gpu_device": gpu_device,
             "memory_usage": memory_usage,
             "batch_size": int(os.getenv("BATCH_SIZE", "32")),
             "timestamp": datetime.now().isoformat()
@@ -248,10 +248,10 @@ async def get_metrics():
         # 简化的指标收集
         metrics = {
             "model_loaded": sentiment_model is not None,
-            "dla_core": int(os.getenv("DLA_CORE", "0")),
+            "gpu_device": 0 if torch.cuda.is_available() else -1,
             "batch_size": int(os.getenv("BATCH_SIZE", "32")),
-            "precision": "FP16",
-            "hardware_target": "DLA"
+            "precision": "FP16" if torch.cuda.is_available() else "FP32",
+            "hardware_target": "GPU" if torch.cuda.is_available() else "CPU"
         }
         
         if torch.cuda.is_available():
@@ -274,7 +274,7 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", "8000"))
     
     logger.info(f"Starting sentiment analysis service on {host}:{port}")
-    logger.info(f"DLA Core: {os.getenv('DLA_CORE', '0')}")
+    logger.info(f"GPU Device: {0 if torch.cuda.is_available() else 'CPU'}")
     logger.info(f"Batch Size: {os.getenv('BATCH_SIZE', '32')}")
     logger.info(f"Model: {os.getenv('MODEL_NAME', 'IDEA-CCNL/Erlangshen-Roberta-330M-Sentiment')}")
     
@@ -285,5 +285,5 @@ if __name__ == "__main__":
         port=port,
         log_level="info",
         access_log=True,
-        workers=1  # DLA服务使用单进程
+        workers=1  # GPU服务使用单进程避免显存冲突
     )

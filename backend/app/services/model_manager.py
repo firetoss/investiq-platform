@@ -17,7 +17,7 @@ import time
 from pydantic import BaseModel, Field
 import torch
 
-from .jetson_optimizer import jetson_optimizer, DLAEngine, TensorRTEngine
+from .jetson_optimizer import jetson_optimizer, TensorRTEngine
 
 # 条件导入，避免在没有安装时报错
 try:
@@ -67,7 +67,6 @@ class HardwareTarget(str, Enum):
     """硬件目标枚举"""
     CPU = "cpu"  # CPU推理
     GPU = "gpu"  # GPU推理
-    DLA = "dla"  # DLA推理
     TENSORRT = "tensorrt"  # TensorRT推理
 
 
@@ -83,7 +82,6 @@ class ModelConfig:
     precision: ModelPrecision = ModelPrecision.FP16  # 模型精度
     hardware_target: HardwareTarget = HardwareTarget.GPU  # 硬件目标
     memory_estimate: int = 1000  # 预估内存使用(MB)
-    dla_core: Optional[int] = None  # DLA核心ID (0或1)
     tensorrt_engine_path: Optional[str] = None  # TensorRT引擎路径
 
 
@@ -131,7 +129,6 @@ class ModelManager:
             "total_memory_gb": psutil.virtual_memory().total / (1024**3),
             "gpu_available": torch.cuda.is_available(),
             "gpu_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
-            "dla_available": False,
             "tensorrt_available": TENSORRT_AVAILABLE,
             "jetson_platform": False
         }
@@ -142,7 +139,6 @@ class ModelManager:
                 model_info = f.read().strip()
                 if 'jetson' in model_info.lower() or 'orin' in model_info.lower():
                     capabilities["jetson_platform"] = True
-                    capabilities["dla_available"] = True  # Jetson Orin有DLA
         except:
             pass
         
@@ -199,10 +195,6 @@ class ModelManager:
         # 如果指定的硬件不可用，自动降级
         target = config.hardware_target
         
-        if target == HardwareTarget.DLA and not self.hardware_capabilities.get("dla_available"):
-            logger.warning(f"DLA not available for {config.name}, falling back to GPU")
-            target = HardwareTarget.GPU
-        
         if target == HardwareTarget.TENSORRT and not self.hardware_capabilities.get("tensorrt_available"):
             logger.warning(f"TensorRT not available for {config.name}, falling back to GPU")
             target = HardwareTarget.GPU
@@ -242,14 +234,13 @@ class ModelManager:
                 model_type=ModelType.SENTIMENT,
                 model_path="IDEA-CCNL/Erlangshen-Roberta-330M-Sentiment",
                 precision=ModelPrecision.FP16,
-                hardware_target=HardwareTarget.DLA,
+                hardware_target=HardwareTarget.GPU,
                 memory_estimate=1200,  # 1.2GB，精度优先
-                dla_core=0,  # 使用DLA核心0
                 config={
                     "torch_dtype": torch.float16,
                     "device_map": "auto",
                     "return_all_scores": True,
-                    "batch_size": 32,  # DLA优化批处理
+                    "batch_size": 32,  # GPU优化批处理
                     "max_length": 512,
                     "truncation": True,
                     "padding": True
@@ -261,9 +252,8 @@ class ModelManager:
                 model_type=ModelType.TIMESERIES,
                 model_path="ibm-granite/granite-timeseries-patchtst",
                 precision=ModelPrecision.FP16,
-                hardware_target=HardwareTarget.DLA,
+                hardware_target=HardwareTarget.GPU,
                 memory_estimate=500,  # 500MB，轻量高效
-                dla_core=1,  # 使用DLA核心1
                 config={
                     "torch_dtype": torch.float16,
                     "device_map": "auto",
@@ -364,18 +354,7 @@ class ModelManager:
         optimal_target = self._get_optimal_hardware_target(config)
         
         try:
-            if optimal_target == HardwareTarget.DLA and config.dla_core is not None:
-                # 使用DLA加速
-                logger.info(f"Loading {config.name} with DLA acceleration")
-                dla_engine = await jetson_optimizer.create_dla_engine(config.dla_core)
-                success = await dla_engine.load_model(config.model_path, config.config)
-                
-                if success:
-                    return DLAModelWrapper(dla_engine, config.name)
-                else:
-                    logger.warning(f"DLA loading failed for {config.name}, falling back to standard")
-            
-            # 标准加载方式
+            # 标准GPU/CPU加载方式
             model = pipeline(
                 "text-classification",
                 model=config.model_path,
@@ -551,36 +530,6 @@ class MockTimeseriesModel:
             last_value = next_value
         
         return predictions
-
-
-class DLAModelWrapper:
-    """DLA模型包装器，提供统一接口"""
-    
-    def __init__(self, dla_engine: DLAEngine, name: str):
-        self.dla_engine = dla_engine
-        self.name = name
-    
-    def __call__(self, texts: Union[str, List[str]], **kwargs) -> List[Dict[str, Any]]:
-        """统一的调用接口"""
-        if isinstance(texts, str):
-            texts = [texts]
-        
-        # 使用asyncio运行异步方法
-        import asyncio
-        try:
-            loop = asyncio.get_event_loop()
-            return loop.run_until_complete(self.dla_engine.predict(texts))
-        except RuntimeError:
-            # 如果没有事件循环，创建新的
-            return asyncio.run(self.dla_engine.predict(texts))
-    
-    def close(self):
-        """清理资源"""
-        # DLA引擎清理
-        if hasattr(self.dla_engine, 'model') and self.dla_engine.model:
-            del self.dla_engine.model
-        if hasattr(self.dla_engine, 'tokenizer') and self.dla_engine.tokenizer:
-            del self.dla_engine.tokenizer
 
 
 class TensorRTModelWrapper:

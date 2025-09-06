@@ -37,7 +37,6 @@ class PerformanceMetrics:
     throughput: float  # 吞吐量(requests/s)
     memory_usage: int  # 内存使用(MB)
     gpu_utilization: float  # GPU使用率(%)
-    dla_utilization: float  # DLA使用率(%)
     cpu_utilization: float  # CPU使用率(%)
     batch_size: int  # 批处理大小
     hardware_target: str  # 硬件目标

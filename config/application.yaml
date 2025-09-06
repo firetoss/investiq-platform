@@ -76,9 +76,11 @@ external_services:
   ai_models:
     local_llm:
       enabled: true
-      model_name: "llama2-7b-chat"
+      model_name: "Qwen3-8B-INT8"
+      model_path: "/models/Qwen3-8B-INT8.gguf"
       max_tokens: 2048
-      temperature: 0.3
+      temperature: 0.7
+      top_p: 0.9
       cache_dir: "/app/models"
       
     gpu_config:

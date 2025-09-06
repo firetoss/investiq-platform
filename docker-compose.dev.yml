@@ -30,7 +30,6 @@ services:
       # Jetson硬件配置 (开发环境可能不需要)
       - NVIDIA_VISIBLE_DEVICES=0
       - CUDA_VISIBLE_DEVICES=0
-      - DLA_CORES=2
       - CPU_CORES=12
       
       # 数据库连接 (开发环境)
@@ -55,6 +54,36 @@ services:
     restart: unless-stopped
     # Jetson 开发机可启用GPU支持
     runtime: nvidia
+
+  # 前端开发服务 (Next.js 热重载)
+  frontend-dev:
+    build:
+      context: frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: investiq-frontend-dev
+    ports:
+      - "3000:3000"    # Next.js开发服务器
+    volumes:
+      # 代码热重载
+      - ./frontend:/app:cached
+      - /app/node_modules  # 防止本地node_modules覆盖容器内的
+      - /app/.next         # 缓存构建文件
+    environment:
+      # Next.js开发环境
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api
+      - NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
+      
+      # 开发工具配置
+      - FAST_REFRESH=true
+      - WATCHPACK_POLLING=true  # Docker内文件监听优化
+      
+    networks:
+      - investiq-dev-network
+    restart: unless-stopped
+    depends_on:
+      - investiq-dev
 
   # 开发数据库 (轻量配置)
   postgres-dev:

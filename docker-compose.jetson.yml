@@ -1,5 +1,5 @@
 # InvestIQ Platform - Jetson Orin AGX优化部署配置
-# 支持GPU+2DLA+CPU四重并行计算架构
+# 支持GPU+CPU双并行计算架构
 # 基于dustynv预优化镜像，JetPack 36.4.4
 
 version: '3.8'
@@ -28,7 +28,6 @@ services:
       # Jetson硬件配置
       - NVIDIA_VISIBLE_DEVICES=0
       - CUDA_VISIBLE_DEVICES=0
-      - DLA_CORES=2
       - CPU_CORES=12
       
       # 服务发现
