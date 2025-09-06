@@ -2,8 +2,8 @@
 # 仅包含API网关、业务逻辑、数据库操作
 # AI功能通过HTTP调用独立的dustynv服务
 
-# 基础镜像 - 仅用于主应用
-FROM dustynv/pytorch:2.1-r36.4.4 as final
+# 基础镜像 - 共享基础环境
+FROM dustynv/pytorch:2.7-r36.4.0 AS base
 
 # 设置工作目录
 WORKDIR /app
@@ -37,21 +37,17 @@ ENV TORCH_CUDNN_V8_API_ENABLED=1
 ENV TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1
 
 # 安装项目依赖
-COPY pyproject.toml ./
+COPY pyproject.toml README.md ./
 
 # 安装uv包管理器 (如果镜像中没有)
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh || echo "uv already installed"
 ENV PATH="/root/.cargo/bin:$PATH"
 
-# 安装Python依赖 (仅主应用需要的依赖，不包含AI模型库)
-RUN uv sync --no-dev
+# 配置uv使用中科大镜像源
+ENV UV_INDEX_URL="https://mirrors.ustc.edu.cn/pypi/simple"
 
-# 安装主应用需要的额外库
-RUN pip install --no-cache-dir \
-    httpx \
-    aiohttp \
-    feedparser \
-    aiofiles
+# 安装Python依赖 (统一通过pyproject.toml管理所有依赖)
+RUN uv sync --no-dev
 
 # 创建必要的目录 (仅主应用需要)
 RUN mkdir -p \
@@ -81,10 +77,10 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=10s --retries=3 \
         exit 1
 
 # 开发阶段
-FROM final as development
+FROM base AS development
 
 # 安装开发依赖
-RUN uv sync --dev --extra gpu
+RUN uv sync --dev
 
 # 设置开发环境变量
 ENV FASTAPI_ENV=development
@@ -94,13 +90,13 @@ ENV LOG_LEVEL=DEBUG
 CMD ["uv", "run", "uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
 # 生产阶段
-FROM final as production
+FROM base AS production
 
 # 创建非root用户 (安全考虑)
 RUN groupadd -r investiq && useradd -r -g investiq investiq
 
 # 设置文件所有权
-RUN chown -R investiq:investiq /app /models
+RUN chown -R investiq:investiq /app
 
 # 切换到非root用户
 USER investiq
