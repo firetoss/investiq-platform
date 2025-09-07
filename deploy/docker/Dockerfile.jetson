@@ -1,109 +1,96 @@
-# InvestIQ主应用Dockerfile - 纯微服务架构
-# 仅包含API网关、业务逻辑、数据库操作
-# AI功能通过HTTP调用独立的dustynv服务
+# InvestIQ主应用Dockerfile - 微服务架构
+# 基于dustynv/pytorch镜像，使用容器自带Python环境
+# uv包管理器，AI功能通过HTTP调用独立服务
 
-# 基础镜像 - 共享基础环境
+# 基础镜像 - dustynv预优化镜像
 FROM dustynv/pytorch:2.7-r36.4.0 AS base
 
 # 设置工作目录
 WORKDIR /app
 
-# 设置环境变量 - Jetson Orin AGX优化
-ENV PYTHONPATH=/app
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+# 设置基础环境变量
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
 
 # Jetson硬件优化环境变量
-ENV NVIDIA_VISIBLE_DEVICES=0
-ENV CUDA_VISIBLE_DEVICES=0
-ENV NVIDIA_DRIVER_CAPABILITIES=all
-
-# DLA优化环境变量
-ENV DLA_ENABLE=1
-ENV DLA_CORES=2
-
-# CUDA优化环境变量
-ENV CUDA_CACHE_DISABLE=0
-ENV CUDA_CACHE_MAXSIZE=2147483648
-ENV LLAMA_CUBLAS=1
+ENV NVIDIA_DRIVER_CAPABILITIES=all \
+    DLA_ENABLE=1 \
+    DLA_CORES=2 \
+    CUDA_CACHE_DISABLE=0 \
+    CUDA_CACHE_MAXSIZE=2147483648
 
 # TensorRT优化环境变量
-ENV TRT_LIBPATH=/usr/lib/aarch64-linux-gnu
-ENV LD_LIBRARY_PATH=${TRT_LIBPATH}:${LD_LIBRARY_PATH}
-ENV TRT_LOGGER_LEVEL=WARNING
+ENV TRT_LIBPATH=/usr/lib/aarch64-linux-gnu \
+    LD_LIBRARY_PATH=${TRT_LIBPATH}:${LD_LIBRARY_PATH} \
+    TRT_LOGGER_LEVEL=WARNING
 
 # PyTorch优化环境变量
-ENV TORCH_CUDNN_V8_API_ENABLED=1
-ENV TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1
+ENV TORCH_CUDNN_V8_API_ENABLED=1 \
+    TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1
 
-# 安装项目依赖
-COPY pyproject.toml README.md ./
-
-# 安装uv包管理器 (如果镜像中没有)
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh || echo "uv already installed"
+# 安装uv包管理器
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.cargo/bin:$PATH"
 
 # 配置uv使用中科大镜像源
 ENV UV_INDEX_URL="https://mirrors.ustc.edu.cn/pypi/simple"
 
-# 安装Python依赖 (统一通过pyproject.toml管理所有依赖)
-RUN uv sync --no-dev
+# 创建项目结构
+RUN mkdir -p /app/logs /app/tmp /app/data
 
-# 创建必要的目录 (仅主应用需要)
-RUN mkdir -p \
-    /app/logs \
-    /app/tmp \
-    /app/data
+# 复制项目配置
+COPY pyproject.toml README.md ./
 
-# 复制应用代码 (仅主应用，不包含AI模型)
+# 安装项目依赖到容器Python环境
+# 避免创建虚拟环境，直接安装到系统Python
+RUN uv sync --no-dev --python-preference=system
+
+# 复制应用代码
 COPY backend/ ./backend/
 COPY data/ ./data/
 
-# 设置目录权限
+# 设置权限
 RUN chmod -R 755 /app/logs /app/tmp /app/data
 
-# 验证主应用依赖
-RUN .venv/bin/python -c "import fastapi; print(f'FastAPI version: {fastapi.__version__}')" && \
-    .venv/bin/python -c "import httpx; print(f'HTTPX available for service communication')" && \
-    .venv/bin/python -c "import sqlalchemy; print(f'SQLAlchemy available for database')"
+# 验证依赖安装 - 暂时禁用以加速构建
+RUN python3 -c "import sys; import fastapi, httpx, sqlalchemy, torch; print(f'Python: {sys.version}'); print(f'FastAPI: {fastapi.__version__}'); print(f'PyTorch: {torch.__version__} (GPU: {torch.cuda.is_available()})'); print('Main app dependencies verified successfully')"
 
 # 暴露端口
 EXPOSE 8000
 
-# 健康检查 - 增强版
-HEALTHCHECK --interval=30s --timeout=30s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8000/health || \
-        curl -f http://localhost:8000/api/v1/performance/health || \
-        exit 1
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=30s --start-period=20s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
 
 # 开发阶段
 FROM base AS development
 
 # 安装开发依赖
-RUN uv sync --dev
+RUN uv sync --dev --python-preference=system
 
 # 设置开发环境变量
-ENV FASTAPI_ENV=development
-ENV LOG_LEVEL=DEBUG
+ENV FASTAPI_ENV=development \
+    LOG_LEVEL=DEBUG
 
-# 开发启动命令
+# 开发启动命令 - 使用uv run确保正确的Python环境
 CMD ["uv", "run", "uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
 # 生产阶段
 FROM base AS production
 
-# 创建非root用户 (安全考虑)
-RUN groupadd -r investiq && useradd -r -g investiq investiq
+# 创建非root用户
+RUN groupadd -r investiq && useradd -r -g investiq -s /bin/bash investiq
 
-# 设置文件所有权
+# 设置目录权限
 RUN chown -R investiq:investiq /app
 
 # 切换到非root用户
 USER investiq
 
 # 设置生产环境变量
-ENV FASTAPI_ENV=production
-ENV LOG_LEVEL=INFO
+ENV FASTAPI_ENV=production \
+    LOG_LEVEL=INFO
 
 # 生产启动命令 - 多进程
 CMD ["uv", "run", "gunicorn", "backend.app.main:app", \

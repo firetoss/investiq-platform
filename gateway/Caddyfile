@@ -1,0 +1,73 @@
+{
+    auto_https off
+}
+
+localhost {
+    # 健康检查路由
+    handle /health {
+        respond "API Gateway is healthy" 200
+    }
+
+    # 行业评分服务路由
+    handle_path /api/v1/industry/* {
+        reverse_proxy scoring-service:8001
+    }
+    
+    # 个股评分服务路由
+    handle_path /api/v1/equity/* {
+        reverse_proxy scoring-service:8001
+    }
+    
+    # 四闸门服务路由
+    handle_path /api/v1/gate/* {
+        reverse_proxy gatekeeper-service:8002
+    }
+    
+    # 组合管理服务路由
+    handle_path /api/v1/portfolio/* {
+        reverse_proxy portfolio-service:8003
+    }
+    
+    # 流动性服务路由
+    handle_path /api/v1/liquidity/* {
+        reverse_proxy liquidity-service:8004
+    }
+    
+    # 告警服务路由
+    handle_path /api/v1/alerts/* {
+        reverse_proxy alert-service:8005
+    }
+    
+    # 证据服务路由
+    handle_path /api/v1/evidence/* {
+        reverse_proxy evidence-service:8006
+    }
+    
+    # 审计服务路由
+    handle_path /api/v1/audit/* {
+        reverse_proxy audit-service:8007
+    }
+    
+    # AI服务路由
+    handle_path /api/v1/llm/* {
+        reverse_proxy llm-service:8011
+    }
+    
+    handle_path /api/v1/sentiment/* {
+        reverse_proxy sentiment-service:8012
+    }
+    
+    handle_path /api/v1/timeseries/* {
+        reverse_proxy timeseries-service:8013
+    }
+    
+    # 前端应用路由
+    handle /* {
+        reverse_proxy frontend:80
+    }
+    
+    # 日志配置
+    log {
+        output file /var/log/caddy/access.log
+    }
+}

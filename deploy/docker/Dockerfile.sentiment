@@ -1,26 +1,104 @@
-FROM dustynv/pytorch:2.1-r36.4.4
+# InvestIQ 情感分析服务 Dockerfile - GPU专用
+# 基于dustynv/pytorch镜像，使用容器自带Python环境
+# 专门处理中文RoBERTa情感分析，GPU优化
+
+FROM dustynv/pytorch:2.7-r36.4.0 AS base
 
 WORKDIR /app
 
+# 设置基础环境变量
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app
 
-# 安装 uv 包管理器（若镜像已内置则跳过）
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh || echo "uv already installed"
+# GPU优化环境变量
+ENV NVIDIA_DRIVER_CAPABILITIES=all \
+    CUDA_VISIBLE_DEVICES=0 \
+    TORCH_CUDNN_BENCHMARK=1 \
+    TORCH_BACKENDS_CUDNN_DETERMINISTIC=0
+
+# 模型缓存配置
+ENV HF_HOME=/app/.cache/huggingface \
+    TRANSFORMERS_CACHE=/app/.cache/transformers \
+    HF_DATASETS_CACHE=/app/.cache/datasets
+
+# 安装uv包管理器
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.cargo/bin:$PATH"
 
-# 仅复制依赖声明，避免因缺少锁文件导致构建失败
-COPY pyproject.toml ./
+# 配置uv使用中科大镜像源
+ENV UV_INDEX_URL="https://mirrors.ustc.edu.cn/pypi/simple" \
+    UV_PROJECT_ENVIRONMENT=/usr/local/lib/python3.10/site-packages
 
-# 安装所需依赖（包含 GPU 相关）
-RUN uv sync --extra gpu --no-dev
+# 创建目录结构
+RUN mkdir -p /app/services /app/logs /app/.cache
+
+# 复制项目配置（最小化配置，仅情感分析相关）
+COPY pyproject.toml README.md ./
+
+# 安装情感分析专用依赖到容器Python环境
+RUN uv add transformers tokenizers accelerate sentence-transformers \
+    fastapi uvicorn pydantic jieba zhconv \
+    httpx requests aiofiles psutil \
+    prometheus-client structlog loguru \
+    --python-preference=system
 
 # 复制服务代码
-RUN mkdir -p /app/services
 COPY backend/app/services/sentiment_server.py /app/services/sentiment_server.py
+
+# 预下载模型到缓存（构建时完成）
+RUN python3 -c "\
+import os; \
+os.environ['TRANSFORMERS_OFFLINE'] = '0'; \
+try: \
+    from transformers import AutoTokenizer, AutoModelForSequenceClassification; \
+    model_name = 'IDEA-CCNL/Erlangshen-Roberta-330M-Sentiment'; \
+    print(f'Downloading model: {model_name}'); \
+    tokenizer = AutoTokenizer.from_pretrained(model_name); \
+    model = AutoModelForSequenceClassification.from_pretrained(model_name); \
+    print('Model cached successfully') \
+except Exception as e: \
+    print(f'Model cache failed: {e}'); \
+    print('Will download at runtime') \
+"
+
+# 验证GPU情感分析环境
+RUN python3 -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}'); print(f'CUDA devices: {torch.cuda.device_count()}'); import transformers; print(f'Transformers: {transformers.__version__}'); print('Sentiment analysis environment ready')"
+
+# 设置权限
+RUN chmod -R 755 /app
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
 
 EXPOSE 8000
 
+# 基础启动命令
 CMD ["uv", "run", "python", "/app/services/sentiment_server.py"]
 
+# 开发阶段
+FROM base AS development
+
+# 开发环境变量
+ENV LOG_LEVEL=DEBUG \
+    BATCH_SIZE=16 \
+    MAX_LENGTH=256
+
+# 生产阶段  
+FROM base AS production
+
+# 创建非root用户
+RUN groupadd -r sentiment && useradd -r -g sentiment -s /bin/bash sentiment
+
+# 设置文件所有权
+RUN chown -R sentiment:sentiment /app
+
+# 切换用户
+USER sentiment
+
+# 生产环境变量
+ENV LOG_LEVEL=INFO \
+    BATCH_SIZE=32 \
+    MAX_LENGTH=512 \
+    MODEL_NAME="IDEA-CCNL/Erlangshen-Roberta-330M-Sentiment"
